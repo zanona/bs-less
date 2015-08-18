@@ -1,0 +1,29 @@
+{
+  "name": "bs-less",
+  "private": true,
+  "version": "0.1.0",
+  "description": "BrowserSync with support for live LESS reload",
+  "main": "index.js",
+  "dependencies": {
+    "autoprefixer-core": "^5.2.1",
+    "browser-sync": "^2.11.0",
+    "less": "^2.5.3",
+    "postcss": "^4.1.16"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": {
+    "bs-less": "cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zanona/bs-less.git"
+  },
+  "author": "Marcus Zanona <zanona@me.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/zanona/bs-less/issues"
+  },
+  "homepage": "https://github.com/zanona/bs-less#readme"
+}
