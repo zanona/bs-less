@@ -51,16 +51,35 @@ module.exports = function (serverPath) {
         fs.readFile(filePath, onLessfile);
     }
 
+    function adjustFile(filePath, res) {
+
+        function onFile(err, contents) {
+            if (err) { return res.end(err.message); }
+            var env = /\$ENV\[['"]?([\w\.\-\/@]+?)['"]?\]/g;
+            contents = contents.toString()
+                .replace(env, function (m, v) {
+                    /*jslint unparam:true*/
+                    return process.env[v];
+                });
+            res.end(contents);
+        }
+
+        fs.readFile(filePath, onFile);
+    }
+
     bs.init({
         notify: false,
         server: serverPath,
         files: [
             serverPath + '*.html',
-            serverPath + 'scripts/*.js',
             serverPath + '*.js',
+            serverPath + 'scripts/*.js',
             {
                 options: { ignoreInitial: true },
-                match: [ serverPath + 'styles/*.less' ],
+                match: [
+                    serverPath + '*.less',
+                    serverPath + 'styles/*.less'
+                ],
                 fn: function (event) {
                     if (event !== 'change') { return; }
                     //this.reload(path.relative(serverPath, filePath));
@@ -72,10 +91,14 @@ module.exports = function (serverPath) {
         ],
         injectFileTypes: ['less'],
         middleware: function (req, res, next) {
-            console.log('URL', req.url);
-            var filePath = url.parse(req.url).pathname;
-            if (path.extname(filePath) === '.less') {
-                compileLess(path.join(serverPath, filePath), res);
+            var cURL = req.url.replace(/\/$/, '/index.html'),
+                filePath = url.parse(cURL).pathname,
+                fileSrc = path.join(serverPath, filePath),
+                ext = path.extname(filePath);
+            if (ext.match(/\.(html|js)/)) {
+                adjustFile(fileSrc, res);
+            } else if (ext === '.less') {
+                compileLess(fileSrc, res);
             } else { next(); }
         },
         snippetOptions: {
