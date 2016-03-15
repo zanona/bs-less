@@ -1,6 +1,5 @@
 /*jslint node:true*/
 module.exports = function (serverPath) {
-    'use strict';
 
     var path = require('path'),
         fs = require('fs'),
@@ -8,30 +7,27 @@ module.exports = function (serverPath) {
         bs = require('browser-sync').create(),
         less = require('less'),
         autoprefixer = require('autoprefixer-core'),
+        browserify = require('browserify'),
         postcss = require('postcss');
 
     function compileLess(filePath, res) {
-
-        function autoprefix(less) {
-            return postcss([autoprefixer]).process(less.css, {
+        function autoprefix(lessResponse) {
+            return postcss([autoprefixer]).process(lessResponse.css, {
                 from: path.basename(filePath),
                 map: true
             });
         }
-
-        function respond(autoprefix) {
-            var css = autoprefix.css;
+        function respond(autoprefixResponse) {
+            var css = autoprefixResponse.css;
             if (autoprefix.warnings) {
                 autoprefix.warnings().forEach(function (warn) {
                     console.warn(warn.toString());
                 });
             }
-
             res.setHeader('content-type', 'text/css');
             res.setHeader('content-length', css.length);
             res.end(css);
         }
-
         function onLessfile(err, contents) {
             if (err) { return res.end(err.message); }
             less
@@ -45,28 +41,24 @@ module.exports = function (serverPath) {
                 })
                 .then(autoprefix)
                 .then(respond)
-                .catch(function (err) { res.end(err.message); });
+                .catch(res.end);
         }
-
         fs.readFile(filePath, onLessfile);
     }
-
+    function replaceEnvVars(contents) {
+        var env = /\$ENV\[['"]?([\w\.\-\/@]+?)['"]?\]/g;
+        contents = contents.toString()
+            .replace(env, function (_, v) { return process.env[v]; });
+        return contents;
+    }
     function adjustFile(filePath, res) {
-
         function onFile(err, contents) {
             if (err) { return res.end(err.message); }
-            var env = /\$ENV\[['"]?([\w\.\-\/@]+?)['"]?\]/g;
-            contents = contents.toString()
-                .replace(env, function (m, v) {
-                    /*jslint unparam:true*/
-                    return process.env[v];
-                });
+            contents = replaceEnvVars(contents, res);
             res.end(contents);
         }
-
         fs.readFile(filePath, onFile);
     }
-
     bs.init({
         notify: false,
         server: serverPath,
@@ -95,11 +87,24 @@ module.exports = function (serverPath) {
                 filePath = url.parse(cURL).pathname,
                 fileSrc = path.join(serverPath, filePath),
                 ext = path.extname(filePath);
-            if (ext.match(/\.(html|js)/)) {
-                adjustFile(fileSrc, res);
-            } else if (ext === '.less') {
-                compileLess(fileSrc, res);
-            } else { next(); }
+            if (ext.match(/\.less$/)) {
+                return compileLess(fileSrc, res);
+            }
+            if (ext.match(/\.js$/)) {
+                if (req.headers['x-requested-with'] === 'XMLHttpRequest') {
+                    return adjustFile(fileSrc, res);
+                }
+                browserify(fileSrc, {debug: true})
+                    .bundle(function (err, bundle) {
+                        bundle = replaceEnvVars(bundle, res);
+                        res.end(bundle);
+                    });
+                return;
+            }
+            if (ext.match(/\.html$/)) {
+                return adjustFile(fileSrc, res);
+            }
+            next();
         },
         snippetOptions: {
             rule: {
