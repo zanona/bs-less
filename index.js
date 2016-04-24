@@ -10,6 +10,23 @@ module.exports = function (serverPath) {
         browserify = require('browserify'),
         postcss = require('postcss');
 
+    function generateStyleError(msg) {
+        return ''
+            + 'html:before {'
+            + '  content: "STYLE ERROR: ' + msg + '";'
+            + '  position: fixed;'
+            + '  font: 1em/1.5 monospace'
+            + '  top: 0;'
+            + '  left: 0;'
+            + '  right: 0;'
+            + '  padding: 1em;'
+            + '  text-align: left;'
+            + '  white-space: pre;'
+            + '  color: white;'
+            + '  background-color: tomato;'
+            + '  z-index: 10000'
+            + '}';
+    }
     function compileLess(filePath, res) {
         function autoprefix(lessResponse) {
             return postcss([autoprefixer]).process(lessResponse.css, {
@@ -42,7 +59,13 @@ module.exports = function (serverPath) {
                 })
                 .then(autoprefix)
                 .then(respond)
-                .catch(res.end);
+                .catch(function (error) {
+                    error = JSON.stringify(error, null, 4)
+                        .replace(/\n/g, '\\A')
+                        .replace(/"/g, '\\"');
+
+                    res.end(generateStyleError(error));
+                });
         }
         fs.readFile(filePath, onLessfile);
     }
