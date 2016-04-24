@@ -10,7 +10,7 @@ module.exports = function (serverPath) {
         browserify = require('browserify'),
         postcss = require('postcss');
 
-    function generateStyleError(msg) {
+    function outputStyleError(msg) {
         return ''
             + 'html:before {'
             + '  content: "STYLE ERROR: ' + msg + '";'
@@ -64,26 +64,64 @@ module.exports = function (serverPath) {
                         .replace(/\n/g, '\\A')
                         .replace(/"/g, '\\"');
 
-                    res.end(generateStyleError(error));
+                    res.end(outputStyleError(error));
                 });
         }
         fs.readFile(filePath, onLessfile);
     }
-    function replaceEnvVars(contents) {
-        var env = /\$ENV\[['"]?([\w\.\-\/@]+?)['"]?\]/g;
-        if (!contents) { return ''; }
-        contents = contents.toString()
-            .replace(env, function (_, v) { return process.env[v]; });
-        return contents;
-    }
-    function adjustFile(filePath, res) {
-        function onFile(err, contents) {
-            if (err) { return res.end(err.message); }
-            contents = replaceEnvVars(contents, res);
-            res.end(contents);
+
+    function resolveFilePath(fileName, parentName) {
+        var dir = path.dirname(parentName);
+        fileName = path.join(dir, fileName);
+        if (!path.extname(fileName)) {
+            return path.join(fileName, 'index.html');
         }
-        fs.readFile(filePath, onFile);
+        return fileName;
     }
+    function readFile(filePath) {
+        return new Promise(function (resolve, reject) {
+            function onFile(err, contents) {
+                if (err) { return reject(err.message); }
+                resolve({
+                    path: filePath,
+                    source: contents.toString()
+                });
+            }
+            fs.readFile(filePath, onFile);
+        });
+    }
+    function replaceEnvVars(vFile) {
+        var pattern = /\$ENV\[['"]?([\w\.\-\/@]+?)['"]?\]/g;
+        return new Promise(function (resolve) {
+            vFile.source = vFile.source.replace(pattern, function (_, v) {
+                return process.env[v] || '';
+            });
+            resolve(vFile);
+        });
+    }
+    }
+
+    function outputSource(vFile) { return vFile.source; }
+    function outputJSError(err) {
+        var err = err.stack
+            .replace(/"/g, '\\"')
+            .replace(/\n/g, '\\n');
+
+        return 'console.error("' + err + '");';
+    }
+    function browserifyPromise(filePath) {
+        return new Promise(function (resolve, reject) {
+            browserify(filePath, {debug: true})
+                .bundle(function (err, bundle) {
+                    if (err) { return reject(err); }
+                    resolve({
+                        path: filePath,
+                        source: bundle.toString()
+                    });
+                });
+        });
+    }
+
     bs.init({
         notify: false,
         server: serverPath,
@@ -108,34 +146,36 @@ module.exports = function (serverPath) {
         ],
         injectFileTypes: ['less'],
         middleware: function (req, res, next) {
+            // It seems there's problem when using BS .then(res.end)
+            // creating my own method
+            function end(data) { return res.end(data); }
+
             var cURL = req.url.replace(/\/$/, '/index.html'),
                 filePath = url.parse(cURL).pathname,
                 fileSrc = path.join(serverPath, filePath),
-                ext = path.extname(filePath);
+                ext = path.extname(filePath),
+                f;
             if (ext.match(/\.less$/)) {
                 return compileLess(fileSrc, res);
-            }
-            if (ext.match(/\.js$/)) {
+            } else if (ext.match(/\.js$/)) {
                 if (req.headers['x-requested-with'] === 'XMLHttpRequest') {
-                    return adjustFile(fileSrc, res);
+                    f = readFile(fileSrc);
+                } else {
+                    f = browserifyPromise(fileSrc);
                 }
-                browserify(fileSrc, {debug: true})
-                    .bundle(function (err, bundle) {
-                        if (err) {
-                            var err = err.stack
-                                .replace(/"/g, '\\"')
-                                .replace(/\n/g, '\\n');
-                            return res.end('console.error("' + err + '");');
-                        }
-                        bundle = replaceEnvVars(bundle, res);
-                        res.end(bundle);
-                    });
-                return;
+                f.then(replaceEnvVars)
+                 .then(outputSource)
+                 .then(end)
+                 .catch(function (e) { res.end(outputJSError(e)); });
+            } else if (ext.match(/\.html$/)) {
+                return readFile(fileSrc)
+                    .then(replaceEnvVars)
+                    .then(outputSource)
+                    .then(end)
+                    .catch(end);
+            } else {
+                next();
             }
-            if (ext.match(/\.html$/)) {
-                return adjustFile(fileSrc, res);
-            }
-            next();
         },
         snippetOptions: {
             rule: {
