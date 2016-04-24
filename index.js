@@ -91,18 +91,18 @@ module.exports = function (serverPath) {
             serverPath + '*.html',
             serverPath + '*.js',
             serverPath + 'scripts/*.js',
+            serverPath + 'lib/**.js',
             {
                 options: { ignoreInitial: true },
                 match: [
                     serverPath + '*.less',
-                    serverPath + 'styles/*.less'
+                    serverPath + '*/*.less',
+                    serverPath + 'lib/**.less'
                 ],
                 fn: function (event) {
                     if (event !== 'change') { return; }
                     //this.reload(path.relative(serverPath, filePath));
-                    this.reload('styles/*.less');
-                    //this.reload('styles/atf.less');
-                    //this.reload('styles/main.less');
+                    this.reload('*.less');
                 }
             }
         ],
