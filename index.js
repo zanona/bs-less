@@ -33,6 +33,7 @@ module.exports = function (serverPath) {
             less
                 .render(contents.toString(), {
                     filename: filePath,
+                    relativeUrls: true,
                     sourceMap: {
                         outputSourceFiles: true,
                         sourceMapBasepath: serverPath,
