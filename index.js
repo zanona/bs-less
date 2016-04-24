@@ -99,6 +99,27 @@ module.exports = function (serverPath) {
             resolve(vFile);
         });
     }
+    function replaceSSI(vFile) {
+        // more http://www.w3.org/Jigsaw/Doc/User/SSI.html#include
+        var pattern = /<!--#include file=[\"\']?(.+?)[\"\']? -->/g;
+        return new Promise(function (resolve) {
+            function check (match) {
+                if (!match) { resolve(vFile); }
+                readFile(resolveFilePath(match[1], vFile.path))
+                    .then(replaceSSI)
+                    .then(replaceEnvVars)
+                    .then(function ($vFile) {
+                        vFile.source = vFile.source
+                            .replace(match[0], $vFile.source);
+                        check(pattern.exec(vFile.source));
+                    })
+                    .catch(function (e) {
+                        vFile.source = vFile.source.replace(match[0], e);
+                        check(pattern.exec(vFile.source));
+                    });
+            }
+            check(pattern.exec(vFile.source));
+        });
     }
 
     function outputSource(vFile) { return vFile.source; }
@@ -169,6 +190,7 @@ module.exports = function (serverPath) {
                  .catch(function (e) { res.end(outputJSError(e)); });
             } else if (ext.match(/\.html$/)) {
                 return readFile(fileSrc)
+                    .then(replaceSSI)
                     .then(replaceEnvVars)
                     .then(outputSource)
                     .then(end)
