@@ -97,6 +97,12 @@ module.exports = function (serverPath) {
                 }
                 browserify(fileSrc, {debug: true})
                     .bundle(function (err, bundle) {
+                        if (err) {
+                            var err = err.stack
+                                .replace(/"/g, '\\"')
+                                .replace(/\n/g, '\\n');
+                            return res.end('console.error("' + err + '");');
+                        }
                         bundle = replaceEnvVars(bundle, res);
                         res.end(bundle);
                     });
