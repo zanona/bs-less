@@ -71,6 +71,7 @@ module.exports = function (serverPath) {
     }
     function replaceEnvVars(contents) {
         var env = /\$ENV\[['"]?([\w\.\-\/@]+?)['"]?\]/g;
+        if (!contents) { return ''; }
         contents = contents.toString()
             .replace(env, function (_, v) { return process.env[v]; });
         return contents;
