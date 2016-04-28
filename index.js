@@ -8,7 +8,8 @@ module.exports = function (serverPath) {
         less = require('less'),
         autoprefixer = require('autoprefixer-core'),
         browserify = require('browserify'),
-        postcss = require('postcss');
+        postcss = require('postcss'),
+        stream = require('stream');
 
     function outputStyleError(msg) {
         return ''
@@ -70,6 +71,32 @@ module.exports = function (serverPath) {
         fs.readFile(filePath, onLessfile);
     }
 
+    function browserifyInlineScripts(vFile) {
+        var scripts = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi;
+        return new Promise(function (resolve) {
+            var vPath = path.parse(vFile.path);
+            function check() {
+                var r = scripts.exec(vFile.source),
+                    src;
+                if (!r) { return resolve(vFile); }
+                if (!r[3] || !r[3].match(/require\(/)) { return check(); }
+                src = new stream.Readable();
+                src.push(r[3]);
+                src.push(null);
+                src.file = vPath.dir + '/' + vPath.name +
+                    '/script_' + r.index + '.js';
+                browserify(src, {
+                    debug: true,
+                    basedir: path.dirname(vPath.dir)
+                }).bundle(function (err, output) {
+                    if (output) { output = output.toString(); }
+                    vFile.source = vFile.source.replace(r[3], err || output);
+                    check();
+                });
+            }
+            check();
+        });
+    }
     function resolveFilePath(fileName, parentName) {
         var dir = path.dirname(parentName);
         fileName = path.join(dir, fileName);
@@ -118,6 +145,7 @@ module.exports = function (serverPath) {
                 if (!match) { resolve(vFile); }
                 readFile(resolveFilePath(match[1], vFile.path))
                     .then(adjustFilePaths)
+                    .then(browserifyInlineScripts)
                     .then(replaceSSI)
                     .then(replaceEnvVars)
                     .then(function ($vFile) {
