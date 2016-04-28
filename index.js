@@ -99,6 +99,17 @@ module.exports = function (serverPath) {
             resolve(vFile);
         });
     }
+    function adjustFilePaths(vFile) {
+        var links = /(?:src|href)=['"]?(.+?)['">\s]/g;
+        return new Promise(function (resolve) {
+            vFile.source = vFile.source.replace(links, function (m, src) {
+                if (src.match(/^(\w+:|#|\/)/)) { return m; }
+                var resolved = resolveFilePath(src, vFile.path);
+                return m.replace(src, resolved);
+            });
+            resolve(vFile);
+        });
+    }
     function replaceSSI(vFile) {
         // more http://www.w3.org/Jigsaw/Doc/User/SSI.html#include
         var pattern = /<!--#include file=[\"\']?(.+?)[\"\']? -->/g;
@@ -106,6 +117,7 @@ module.exports = function (serverPath) {
             function check (match) {
                 if (!match) { resolve(vFile); }
                 readFile(resolveFilePath(match[1], vFile.path))
+                    .then(adjustFilePaths)
                     .then(replaceSSI)
                     .then(replaceEnvVars)
                     .then(function ($vFile) {
