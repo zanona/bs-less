@@ -8,7 +8,7 @@
     "autoprefixer-core": "^5.2.1",
     "browser-sync": "^2.11.2",
     "browserify": "^13.0.0",
-    "less": "^2.5.3",
+    "less": "^2.6.1",
     "postcss": "^4.1.16"
   },
   "scripts": {
