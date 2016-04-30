@@ -11,6 +11,7 @@ module.exports = function (serverPath) {
         postcss = require('postcss'),
         stream = require('stream');
 
+    function outputSource(vFile) { return vFile.source; }
     function outputStyleError(msg) {
         return ''
             + 'html:before {'
@@ -28,6 +29,14 @@ module.exports = function (serverPath) {
             + '  z-index: 10000'
             + '}';
     }
+    function outputJSError(err) {
+        var err = err.stack
+            .replace(/"/g, '\\"')
+            .replace(/\n/g, '\\n');
+
+        return 'console.error("' + err + '");';
+    }
+
     function compileLess(filePath, res) {
         function autoprefix(lessResponse) {
             return postcss([autoprefixer]).process(lessResponse.css, {
@@ -83,13 +92,16 @@ module.exports = function (serverPath) {
                 src = new stream.Readable();
                 src.push(r[3]);
                 src.push(null);
-                src.file = vPath.dir + '/' + vPath.name +
-                    '/script_' + r.index + '.js';
+                src.file = path.join(
+                    vPath.dir,
+                    vPath.name + '_script_' + r.index + '.js'
+                );
                 browserify(src, {
                     debug: true,
-                    basedir: path.dirname(vPath.dir)
+                    basedir: vPath.dir
                 }).bundle(function (err, output) {
                     if (output) { output = output.toString(); }
+                    if (err) { err = outputJSError(err); }
                     vFile.source = vFile.source.replace(r[3], err || output);
                     check();
                 });
@@ -97,6 +109,19 @@ module.exports = function (serverPath) {
             check();
         });
     }
+    function browserifyPromise(filePath) {
+        return new Promise(function (resolve, reject) {
+            browserify(filePath, {debug: true})
+                .bundle(function (err, bundle) {
+                    if (err) { return reject(err); }
+                    resolve({
+                        path: filePath,
+                        source: bundle.toString()
+                    });
+                });
+        });
+    }
+
     function resolveFilePath(fileName, parentName) {
         var dir = path.dirname(parentName);
         fileName = path.join(dir, fileName);
@@ -162,27 +187,6 @@ module.exports = function (serverPath) {
         });
     }
 
-    function outputSource(vFile) { return vFile.source; }
-    function outputJSError(err) {
-        var err = err.stack
-            .replace(/"/g, '\\"')
-            .replace(/\n/g, '\\n');
-
-        return 'console.error("' + err + '");';
-    }
-    function browserifyPromise(filePath) {
-        return new Promise(function (resolve, reject) {
-            browserify(filePath, {debug: true})
-                .bundle(function (err, bundle) {
-                    if (err) { return reject(err); }
-                    resolve({
-                        path: filePath,
-                        source: bundle.toString()
-                    });
-                });
-        });
-    }
-
     bs.init({
         notify: false,
         server: serverPath,
@@ -230,6 +234,10 @@ module.exports = function (serverPath) {
                  .catch(function (e) { res.end(outputJSError(e)); });
             } else if (ext.match(/\.html$/)) {
                 return readFile(fileSrc)
+                    /* MUST BROWSERIFY INLINE SCRIPTS BEFORE SSI IS EXPANDED,
+                     * SINCE IT COULD GENERATE ADDITIONAL INLINE SCRIPTS
+                     * */
+                    .then(browserifyInlineScripts)
                     .then(replaceSSI)
                     .then(replaceEnvVars)
                     .then(outputSource)
