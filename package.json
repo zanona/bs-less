@@ -6,7 +6,7 @@
   "main": "index.js",
   "dependencies": {
     "autoprefixer-core": "^5.2.1",
-    "browser-sync": "^2.11.2",
+    "browser-sync": "^2.12.5",
     "browserify": "^13.0.0",
     "less": "^2.6.1",
     "postcss": "^4.1.16"
