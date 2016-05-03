@@ -1,15 +1,16 @@
 /*jslint node:true*/
 module.exports = function (serverPath) {
 
-    var path = require('path'),
-        fs = require('fs'),
-        url  = require('url'),
-        bs = require('browser-sync').create(),
-        less = require('less'),
+    var path         = require('path'),
+        fs           = require('fs'),
+        url          = require('url'),
+        stream       = require('stream'),
+        bs           = require('browser-sync').create(),
+        less         = require('less'),
         autoprefixer = require('autoprefixer-core'),
-        browserify = require('browserify'),
-        postcss = require('postcss'),
-        stream = require('stream');
+        browserify   = require('browserify'),
+        postcss      = require('postcss'),
+        marked       = require('marked').setOptions({smartypants: true});
 
     function outputSource(vFile) { return vFile.source; }
     function outputStyleError(msg) {
@@ -134,6 +135,9 @@ module.exports = function (serverPath) {
         return new Promise(function (resolve, reject) {
             function onFile(err, contents) {
                 if (err) { return reject(err.message); }
+                if (path.extname(filePath).match(/\.(md|mardown|mdown)/)) {
+                    contents = marked(contents.toString());
+                }
                 resolve({
                     path: filePath,
                     source: contents.toString()

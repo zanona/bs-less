@@ -9,6 +9,7 @@
     "browser-sync": "^2.12.5",
     "browserify": "^13.0.0",
     "less": "^2.6.1",
+    "marked": "^0.3.5",
     "postcss": "^4.1.16"
   },
   "scripts": {
