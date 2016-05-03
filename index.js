@@ -101,9 +101,15 @@ module.exports = function (serverPath) {
                     debug: true,
                     basedir: vPath.dir
                 }).bundle(function (err, output) {
-                    if (output) { output = output.toString(); }
+                    if (output) {
+                        output = output.toString();
+                    }
                     if (err) { err = outputJSError(err); }
-                    vFile.source = vFile.source.replace(r[3], err || output);
+                    vFile.source = vFile.source.replace(r[3], function () {
+                        /*SEND TO FUNCTION SO IT WON'T EVALUATE
+                        * THINGS LIKE $1 $2 $$ WITHIN CONTENT*/
+                        return err || output;
+                    });
                     check();
                 });
             }
