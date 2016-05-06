@@ -1,4 +1,3 @@
-/*jslint node:true*/
 module.exports = function (serverPath) {
 
     var path         = require('path'),
@@ -202,6 +201,7 @@ module.exports = function (serverPath) {
         server: serverPath,
         files: [
             serverPath + '*.html',
+            serverPath + 'lib/**.html',
             serverPath + '*.js',
             serverPath + 'scripts/*.js',
             serverPath + 'lib/**.js',
