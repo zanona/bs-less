@@ -8,6 +8,7 @@ module.exports = function (serverPath) {
         less         = require('less'),
         autoprefixer = require('autoprefixer-core'),
         browserify   = require('browserify'),
+        regenerator  = require('regenerator'),
         postcss      = require('postcss'),
         marked       = require('marked').setOptions({smartypants: true});
 
@@ -99,7 +100,9 @@ module.exports = function (serverPath) {
                 browserify(src, {
                     debug: true,
                     basedir: vPath.dir
-                }).bundle(function (err, output) {
+                })
+                .transform(regenerator)
+                .bundle(function (err, output) {
                     if (output) {
                         output = output.toString();
                     }
@@ -115,13 +118,18 @@ module.exports = function (serverPath) {
             check();
         });
     }
-    function browserifyPromise(filePath) {
+    function browserifyPromise(vFile) {
+        var src = new stream.Readable();
+        src.push(vFile.source);
+        src.push(null);
+        src.file = vFile.path;
         return new Promise(function (resolve, reject) {
-            browserify(filePath, {debug: true})
+            browserify(src, {debug: true})
+                .transform(regenerator)
                 .bundle(function (err, bundle) {
                     if (err) { return reject(err); }
                     resolve({
-                        path: filePath,
+                        path: vFile.path,
                         source: bundle.toString()
                     });
                 });
@@ -239,7 +247,7 @@ module.exports = function (serverPath) {
                 if (req.headers['x-requested-with'] === 'XMLHttpRequest') {
                     f = readFile(fileSrc);
                 } else {
-                    f = browserifyPromise(fileSrc);
+                    f = readFile(fileSrc).then(browserifyPromise);
                 }
                 f.then(replaceEnvVars)
                  .then(outputSource)
