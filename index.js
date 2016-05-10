@@ -30,7 +30,7 @@ module.exports = function (serverPath) {
             + '}';
     }
     function outputJSError(err) {
-        var err = err.stack
+        var err = err.annotated
             .replace(/"/g, '\\"')
             .replace(/\n/g, '\\n');
 
