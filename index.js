@@ -184,11 +184,14 @@ module.exports = function (serverPath) {
                     .then(replaceEnvVars)
                     .then(function ($vFile) {
                         vFile.source = vFile.source
-                            .replace(match[0], $vFile.source);
+                            .replace(match[0], function () {
+                                return $vFile.source;
+                            });
                         check(pattern.exec(vFile.source));
                     })
                     .catch(function (e) {
-                        vFile.source = vFile.source.replace(match[0], e);
+                        vFile.source = vFile.source
+                        .replace(match[0], function () { return e; });
                         check(pattern.exec(vFile.source));
                     });
             }
