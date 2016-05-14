@@ -9,6 +9,7 @@ module.exports = function (serverPath) {
         autoprefixer = require('autoprefixer-core'),
         browserify   = require('browserify'),
         regenerator  = require('regenerator'),
+        through      = require('through'),
         postcss      = require('postcss'),
         marked       = require('marked').setOptions({smartypants: true});
 
@@ -31,11 +32,10 @@ module.exports = function (serverPath) {
             + '}';
     }
     function outputJSError(err) {
-        var err = err.annotated
+        var error = err.stack
             .replace(/"/g, '\\"')
             .replace(/\n/g, '\\n');
-
-        return 'console.error("' + err + '");';
+        return 'console.error("' + error  + '");';
     }
 
     function compileLess(filePath, res) {
@@ -81,6 +81,19 @@ module.exports = function (serverPath) {
         fs.readFile(filePath, onLessfile);
     }
 
+    function regeneratorTransform () {
+        var data = '';
+        function write(buf) { data += buf; }
+        function end() {
+            try {
+                var code = regenerator.compile(data).code;
+                this.queue(code);
+                this.queue(null);
+            } catch (e) { this.emit('error', e); }
+        }
+        return through(write, end);
+    }
+
     function browserifyInlineScripts(vFile) {
         var scripts = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi;
         return new Promise(function (resolve) {
@@ -101,7 +114,7 @@ module.exports = function (serverPath) {
                     debug: true,
                     basedir: vPath.dir
                 })
-                .transform(regenerator)
+                .transform(regeneratorTransform)
                 .bundle(function (err, output) {
                     if (output) {
                         output = output.toString();
@@ -125,7 +138,7 @@ module.exports = function (serverPath) {
         src.file = vFile.path;
         return new Promise(function (resolve, reject) {
             browserify(src, {debug: true})
-                .transform(regenerator)
+                .transform(regeneratorTransform)
                 .bundle(function (err, bundle) {
                     if (err) { return reject(err); }
                     resolve({
@@ -247,12 +260,14 @@ module.exports = function (serverPath) {
                 if (req.headers['x-requested-with'] === 'XMLHttpRequest') {
                     f = readFile(fileSrc);
                 } else {
-                    f = readFile(fileSrc).then(browserifyPromise);
+                    f = readFile(fileSrc)
+                        .then(browserifyPromise);
                 }
                 f.then(replaceEnvVars)
                  .then(outputSource)
                  .then(end)
-                 .catch(function (e) { res.end(outputJSError(e)); });
+                 .catch(function (e) {
+                     res.end(outputJSError(e)); });
             } else if (ext.match(/\.html$/)) {
                 return readFile(fileSrc)
                     /* MUST BROWSERIFY INLINE SCRIPTS BEFORE SSI IS EXPANDED,
