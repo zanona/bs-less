@@ -80,43 +80,6 @@ module.exports = function (serverPath) {
         fs.readFile(filePath, onLessfile);
     }
 
-    function browserifyInlineScripts(vFile) {
-        var scripts = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi;
-        return new Promise(function (resolve) {
-            var vPath = path.parse(vFile.path);
-            function check() {
-                var r = scripts.exec(vFile.source),
-                    src;
-                if (!r) { return resolve(vFile); }
-                if (!r[3] || !r[3].match(/require\(/)) { return check(); }
-                src = new stream.Readable();
-                src.push(r[3]);
-                src.push(null);
-                src.file = path.join(
-                    vPath.dir,
-                    vPath.name + '_script_' + r.index + '.js'
-                );
-                browserify(src, {
-                    debug: true,
-                    basedir: vPath.dir
-                })
-                .transform(regenerator)
-                .bundle(function (err, output) {
-                    if (output) {
-                        output = output.toString();
-                    }
-                    if (err) { err = outputJSError(err); }
-                    vFile.source = vFile.source.replace(r[3], function () {
-                        /*SEND TO FUNCTION SO IT WON'T EVALUATE
-                        * THINGS LIKE $1 $2 $$ WITHIN CONTENT*/
-                        return err || output;
-                    });
-                    check();
-                });
-            }
-            check();
-        });
-    }
     function browserifyPromise(vFile) {
         var src = new stream.Readable();
         src.push(vFile.source);
@@ -126,13 +89,74 @@ module.exports = function (serverPath) {
             browserify(src, {debug: true})
                 .transform(regenerator)
                 .bundle(function (err, bundle) {
-                    if (err) { return reject(err); }
+                    if (err) {
+                        console.log('ERROR', err.stack);
+                        console.log(vFile.source);
+                        return reject(err); }
                     resolve({
                         path: vFile.path,
                         source: bundle.toString()
                     });
                 });
         });
+    }
+    function browserifyInlineScripts(vFile) {
+        var scripts = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
+            vPath = path.parse(vFile.path);
+
+        function replaceContent(original, bundle) {
+            return vFile.source.replace(original, function () {
+                /*SEND TO FUNCTION SO IT WON'T EVALUATE
+                * THINGS LIKE $1 $2 $$ WITHIN CONTENT*/
+                return bundle;
+            });
+        }
+
+        return new Promise(function (resolve) {
+            function check() {
+                var r = scripts.exec(vFile.source),
+                    inlineFile;
+                if (!r) { return resolve(vFile); }
+                if (!r[3] || !r[3].match(/require\(/)) { return check(); }
+
+                inlineFile = {
+                    path: path.join(
+                        vPath.dir,
+                        vPath.name + '_script_' + r.index + '.js'
+                    ),
+                    source: r[3]
+                };
+                browserifyPromise(inlineFile)
+                    .then(function (iFile) {
+                        vFile.source =
+                            replaceContent(inlineFile.source, iFile.source);
+                        check();
+                    })
+                    .catch(function (error) {
+                        vFile.source =
+                            replaceContent(inlineFile.source, outputJSError(error));
+                        check();
+                    });
+            }
+            check();
+        });
+    }
+
+    function mergeInlineScripts(vFile) {
+        var tags = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
+            scripts = [];
+        vFile.source = vFile.source.replace(tags, function (m, t, a, content) {
+            if (content) {
+                content = '(function () { ' + content + '}());';
+                if (scripts.indexOf(content) === -1) {
+                    scripts.push(content);
+                }
+                return '';
+            }
+            return m;
+        });
+        vFile.source += '<script>' + scripts.join('\n\n') + '</script>';
+        return vFile;
     }
 
     function resolveFilePath(fileName, parentName) {
@@ -168,11 +192,16 @@ module.exports = function (serverPath) {
         });
     }
     function adjustFilePaths(vFile) {
-        var links = /(?:src|href)=['"]?(.+?)['">\s]/g;
+        var links = /(?:src|href)=['"]?(.+?)['">\s]/g,
+            requires = /require\(['"](\..*?)['"]\)/g;
         return new Promise(function (resolve) {
             vFile.source = vFile.source.replace(links, function (m, src) {
                 if (src.match(/^(\w+:|#|\/)/)) { return m; }
                 var resolved = resolveFilePath(src, vFile.path);
+                return m.replace(src, resolved);
+            }).replace(requires, function (m, src) {
+                var resolved = './' + resolveFilePath(src, vFile.path)
+                    .replace('/index.html', '');
                 return m.replace(src, resolved);
             });
             resolve(vFile);
@@ -186,7 +215,7 @@ module.exports = function (serverPath) {
                 if (!match) { resolve(vFile); }
                 readFile(resolveFilePath(match[1], vFile.path))
                     .then(adjustFilePaths)
-                    .then(browserifyInlineScripts)
+                    //.then(browserifyInlineScripts)
                     .then(replaceSSI)
                     .then(replaceEnvVars)
                     .then(function ($vFile) {
@@ -259,9 +288,10 @@ module.exports = function (serverPath) {
                     /* MUST BROWSERIFY INLINE SCRIPTS BEFORE SSI IS EXPANDED,
                      * SINCE IT COULD GENERATE ADDITIONAL INLINE SCRIPTS
                      * */
-                    .then(browserifyInlineScripts)
                     .then(replaceSSI)
                     .then(replaceEnvVars)
+                    .then(mergeInlineScripts)
+                    .then(browserifyInlineScripts)
                     .then(outputSource)
                     .then(end)
                     .catch(end);
