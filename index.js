@@ -80,6 +80,26 @@ module.exports = function (serverPath) {
         fs.readFile(filePath, onLessfile);
     }
 
+    function groupLinkTags(vFile) {
+        var tags = /<link .*(?:src|href)=['"]?(.+?)['"]?[>\s]/g,
+            head = /(<\/title>|<meta .*>)|(<\/head>|<body|<script)/,
+            links = [];
+        vFile.source = vFile.source.replace(tags, function (m) {
+            if (links.indexOf(m) === -1) { links.push(m); }
+            return '';
+        });
+        links = links.join('\n');
+        vFile.source = vFile.source.replace(head, function (m, after) {
+            if (after) {
+                m += '\n' + links;
+            } else {
+                m = links + '\n' + m;
+            }
+            return m;
+        });
+        return vFile;
+    }
+
     function browserifyPromise(vFile) {
         var src = new stream.Readable();
         src.push(vFile.source);
@@ -291,6 +311,7 @@ module.exports = function (serverPath) {
                     .then(replaceSSI)
                     .then(replaceEnvVars)
                     .then(mergeInlineScripts)
+                    .then(groupLinkTags)
                     .then(browserifyInlineScripts)
                     .then(outputSource)
                     .then(end)
