@@ -9,7 +9,6 @@ module.exports = function (serverPath) {
         autoprefixer = require('autoprefixer-core'),
         browserify   = require('browserify'),
         regenerator  = require('regenerator'),
-        through      = require('through'),
         postcss      = require('postcss'),
         marked       = require('marked').setOptions({smartypants: true});
 
@@ -81,19 +80,6 @@ module.exports = function (serverPath) {
         fs.readFile(filePath, onLessfile);
     }
 
-    function regeneratorTransform () {
-        var data = '';
-        function write(buf) { data += buf; }
-        function end() {
-            try {
-                var code = regenerator.compile(data).code;
-                this.queue(code);
-                this.queue(null);
-            } catch (e) { this.emit('error', e); }
-        }
-        return through(write, end);
-    }
-
     function browserifyInlineScripts(vFile) {
         var scripts = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi;
         return new Promise(function (resolve) {
@@ -114,7 +100,7 @@ module.exports = function (serverPath) {
                     debug: true,
                     basedir: vPath.dir
                 })
-                .transform(regeneratorTransform)
+                .transform(regenerator)
                 .bundle(function (err, output) {
                     if (output) {
                         output = output.toString();
@@ -138,7 +124,7 @@ module.exports = function (serverPath) {
         src.file = vFile.path;
         return new Promise(function (resolve, reject) {
             browserify(src, {debug: true})
-                .transform(regeneratorTransform)
+                .transform(regenerator)
                 .bundle(function (err, bundle) {
                     if (err) { return reject(err); }
                     resolve({
