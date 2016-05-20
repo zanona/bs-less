@@ -9,6 +9,8 @@ module.exports = function (serverPath) {
         autoprefixer = require('autoprefixer-core'),
         browserify   = require('browserify'),
         regenerator  = require('regenerator'),
+        babelify     = require('babelify'),
+        es2015       = require('babel-preset-es2015'),
         postcss      = require('postcss'),
         marked       = require('marked').setOptions({smartypants: true});
 
@@ -108,10 +110,9 @@ module.exports = function (serverPath) {
         return new Promise(function (resolve, reject) {
             browserify(src, {debug: true})
                 .transform(regenerator)
+                .transform(babelify, es2015)
                 .bundle(function (err, bundle) {
                     if (err) {
-                        console.log('ERROR', err.stack);
-                        console.log(vFile.source);
                         return reject(err); }
                     resolve({
                         path: vFile.path,
