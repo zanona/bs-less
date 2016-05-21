@@ -257,7 +257,11 @@ module.exports = function (serverPath) {
     }
 
     bs.init({
+        browser: 'google chrome',
+        //open: false,
+        online: false,
         notify: false,
+        minify: false,
         server: serverPath,
         files: [
             serverPath + '*.html',
