@@ -1,3 +1,4 @@
+/*eslint indent:4*/
 module.exports = function (serverPath) {
 
     var path         = require('path'),
@@ -83,7 +84,7 @@ module.exports = function (serverPath) {
     }
 
     function groupLinkTags(vFile) {
-        var tags = /<link .*(?:src|href)=['"]?(.+?)['"]?[>\s]/g,
+        var tags = /<link .*(?:src|href)=['"]?([\w\.]+)['"]?.*>/g,
             head = /(<\/title>|<meta .*>)|(<\/head>|<body|<script)/,
             links = [];
         vFile.source = vFile.source.replace(tags, function (m) {
@@ -138,7 +139,8 @@ module.exports = function (serverPath) {
                 var r = scripts.exec(vFile.source),
                     inlineFile;
                 if (!r) { return resolve(vFile); }
-                if (!r[3] || !r[3].match(/require\(/)) { return check(); }
+                //if (!r[3] || !r[3].match(/require\(/)) { return check(); }
+                if (!r[3]) { return check(); }
 
                 inlineFile = {
                     path: path.join(
@@ -258,7 +260,7 @@ module.exports = function (serverPath) {
 
     bs.init({
         browser: 'google chrome',
-        //open: false,
+        open: false,
         online: false,
         notify: false,
         minify: false,
