@@ -296,6 +296,9 @@ module.exports = function (serverPath) {
                 fileSrc = path.join(serverPath, filePath),
                 ext = path.extname(filePath),
                 f;
+            if (filePath.match(/bower_components|node_modules/)) {
+                return next();
+            }
             if (ext.match(/\.less$/)) {
                 return compileLess(fileSrc, res);
             } else if (ext.match(/\.js$/)) {
