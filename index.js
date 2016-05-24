@@ -289,7 +289,10 @@ module.exports = function (serverPath) {
         middleware: function (req, res, next) {
             // It seems there's problem when using BS .then(res.end)
             // creating my own method
-            function end(data) { return res.end(data); }
+            function end(data, statusCode) {
+                res.writeHead(statusCode || 200);
+                return res.end(data);
+            }
 
             var cURL = req.url.replace(/\/$/, '/index.html'),
                 filePath = url.parse(cURL).pathname,
@@ -303,9 +306,10 @@ module.exports = function (serverPath) {
                 return compileLess(fileSrc, res);
             } else if (ext.match(/\.js$/)) {
                 if (req.headers['x-requested-with'] === 'XMLHttpRequest') {
-                    f = readFile(fileSrc);
+                    f = readFile(fileSrc).catch((e) => { end(e, 404); })
                 } else {
                     f = readFile(fileSrc)
+                        .catch((e) => { end(e, 404); })
                         .then(browserifyPromise);
                 }
                 f.then(replaceEnvVars)
@@ -315,6 +319,7 @@ module.exports = function (serverPath) {
                      res.end(outputJSError(e)); });
             } else if (ext.match(/\.html$/)) {
                 return readFile(fileSrc)
+                    .catch((e) => { end(e, 404); })
                     /* MUST BROWSERIFY INLINE SCRIPTS BEFORE SSI IS EXPANDED,
                      * SINCE IT COULD GENERATE ADDITIONAL INLINE SCRIPTS
                      * */
