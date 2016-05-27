@@ -129,7 +129,8 @@ module.exports = function (serverPath) {
     }
     function browserifyPromise(vFile) {
         return new Promise(function (resolve, reject) {
-            if (!vFile.source.match(/^(?:\s*)?import|require\(/gm)) {
+            const importMatch = /^(?:\s*)?import\b|\brequire\(/gm;
+            if (!vFile.source.match(importMatch)) {
                 return resolve(vFile); }
             var src = new stream.Readable();
             src.push(vFile.source);
