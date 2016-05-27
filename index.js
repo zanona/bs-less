@@ -10,6 +10,7 @@ module.exports = function (serverPath) {
         autoprefixer = require('autoprefixer-core'),
         browserify   = require('browserify'),
         regenerator  = require('regenerator'),
+        babel        = require('babel-core'),
         babelify     = require('babelify'),
         es2015       = require('babel-preset-es2015'),
         postcss      = require('postcss'),
@@ -103,18 +104,45 @@ module.exports = function (serverPath) {
         return vFile;
     }
 
+    function regenerate(vFile) {
+        return new Promise((resolve, reject) => {
+            try {
+                vFile.source = regenerator.compile(vFile.source).code;
+                resolve(vFile);
+            } catch (e) {
+                reject(e);
+            }
+        });
+    }
+    function babelPromise(vFile) {
+        return new Promise((resolve, reject) => {
+            try {
+                vFile.source = babel.transform(vFile.source, {
+                    filename: vFile.path,
+                    presets: [es2015]
+                }).code;
+                resolve(vFile);
+            } catch (e) {
+                reject(e);
+            }
+        });
+    }
     function browserifyPromise(vFile) {
-        var src = new stream.Readable();
-        src.push(vFile.source);
-        src.push(null);
-        src.file = vFile.path;
         return new Promise(function (resolve, reject) {
+            if (!vFile.source.match(/^(?:\s*)?import|require\(/gm)) {
+                return resolve(vFile); }
+            var src = new stream.Readable();
+            src.push(vFile.source);
+            src.push(null);
+            src.file = vFile.path;
             browserify(src, {debug: true})
                 .transform(regenerator)
-                .transform(babelify, es2015)
+                .transform(babelify, {
+                    filename: vFile.path,
+                    presets: [es2015]
+                })
                 .bundle(function (err, bundle) {
-                    if (err) {
-                        return reject(err); }
+                    if (err) { return reject(err); }
                     resolve({
                         path: vFile.path,
                         source: bundle.toString()
@@ -122,7 +150,7 @@ module.exports = function (serverPath) {
                 });
         });
     }
-    function browserifyInlineScripts(vFile) {
+    function processInlineScripts(vFile) {
         var scripts = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
             vPath = path.parse(vFile.path);
 
@@ -136,28 +164,31 @@ module.exports = function (serverPath) {
 
         return new Promise(function (resolve) {
             function check() {
-                var r = scripts.exec(vFile.source),
+                var scriptMatch = scripts.exec(vFile.source),
+                    scriptContent = scriptMatch && scriptMatch[3],
                     inlineFile;
-                if (!r) { return resolve(vFile); }
-                //if (!r[3] || !r[3].match(/require\(/)) { return check(); }
-                if (!r[3]) { return check(); }
+                if (!scriptMatch) { return resolve(vFile); }
+                if (!scriptContent) { return check(); }
 
                 inlineFile = {
                     path: path.join(
                         vPath.dir,
-                        vPath.name + '_script_' + r.index + '.js'
+                        vPath.name + '_script_' + scriptMatch.index + '.js'
                     ),
-                    source: r[3]
+                    source: scriptContent
                 };
-                browserifyPromise(inlineFile)
+                regenerate(inlineFile)
+                    .then(babelPromise)
+                    .then(browserifyPromise)
                     .then(function (iFile) {
                         vFile.source =
-                            replaceContent(inlineFile.source, iFile.source);
+                            replaceContent(scriptContent, iFile.source);
                         check();
                     })
                     .catch(function (error) {
                         vFile.source =
-                            replaceContent(inlineFile.source, outputJSError(error));
+                            replaceContent(
+                                inlineFile.source, outputJSError(error));
                         check();
                     });
             }
@@ -238,7 +269,7 @@ module.exports = function (serverPath) {
                 if (!match) { resolve(vFile); }
                 readFile(resolveFilePath(match[1], vFile.path))
                     .then(adjustFilePaths)
-                    //.then(browserifyInlineScripts)
+                    //.then(processInlineScripts)
                     .then(replaceSSI)
                     .then(replaceEnvVars)
                     .then(function ($vFile) {
@@ -310,6 +341,8 @@ module.exports = function (serverPath) {
                 } else {
                     f = readFile(fileSrc)
                         .catch((e) => { end(e, 404); })
+                        .then(renegerate)
+                        .then(babelPromise)
                         .then(browserifyPromise);
                 }
                 f.then(replaceEnvVars)
@@ -320,14 +353,14 @@ module.exports = function (serverPath) {
             } else if (ext.match(/\.html$/)) {
                 return readFile(fileSrc)
                     .catch((e) => { end(e, 404); })
-                    /* MUST BROWSERIFY INLINE SCRIPTS BEFORE SSI IS EXPANDED,
+                    /* MUST PROCESS INLINE SCRIPTS BEFORE SSI IS EXPANDED,
                      * SINCE IT COULD GENERATE ADDITIONAL INLINE SCRIPTS
                      * */
                     .then(replaceSSI)
                     .then(replaceEnvVars)
-                    .then(mergeInlineScripts)
-                    .then(groupLinkTags)
-                    .then(browserifyInlineScripts)
+                    //.then(mergeInlineScripts)
+                    //.then(groupLinkTags)
+                    .then(processInlineScripts)
                     .then(outputSource)
                     .then(end)
                     .catch(end);
