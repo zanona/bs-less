@@ -1,4 +1,4 @@
-/*eslint indent:4*/
+/*eslint indent:[1,4]*/
 module.exports = function (serverPath) {
 
     var path         = require('path'),
@@ -41,47 +41,85 @@ module.exports = function (serverPath) {
         return 'console.error("' + error  + '");';
     }
 
-    function compileLess(filePath, res) {
-        function autoprefix(lessResponse) {
-            return postcss([autoprefixer]).process(lessResponse.css, {
-                from: path.basename(filePath),
-                map: true
+    function autoprefixCSS(vFile) {
+        return new Promise((resolve, reject) => {
+            try {
+                const post = postcss([autoprefixer])
+                    .process(vFile.source, {
+                        from: path.basename(vFile.path),
+                        map: true
+                    });
+                if (post.warnings) {
+                    post.warnings().forEach(function (warn) {
+                        console.warn('POSTCSS', warn.toString());
+                    });
+                }
+                vFile.source = post.css;
+                resolve(vFile);
+            } catch (e) {
+                reject(e);
+            }
+        });
+    }
+    function lessify(vFile) {
+        return new Promise((resolve, reject) => {
+            less.render(vFile.source, {
+                filename: vFile.path,
+                relativeUrls: true,
+                sourceMap: {
+                    outputSourceFiles: true,
+                    sourceMapBasepath: serverPath,
+                    sourceMapFileInline: true
+                }
+            }).then((out) => {
+                vFile.source = out.css;
+                resolve(vFile);
+            }).catch(reject);
+        });
+    }
+    function processInlineStyles(vFile) {
+        var styles = /<(style)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
+            vPath = path.parse(vFile.path);
+
+        function replaceContent(original, bundle) {
+            return vFile.source.replace(original, function () {
+                /*SEND TO FUNCTION SO IT WON'T EVALUATE
+                * THINGS LIKE $1 $2 $$ WITHIN CONTENT*/
+                return bundle;
             });
         }
-        function respond(autoprefixResponse) {
-            var css = autoprefixResponse.css;
-            if (autoprefix.warnings) {
-                autoprefix.warnings().forEach(function (warn) {
-                    console.warn(warn.toString());
-                });
-            }
-            res.setHeader('content-type', 'text/css');
-            res.setHeader('content-length', css.length);
-            res.end(css);
-        }
-        function onLessfile(err, contents) {
-            if (err) { return res.end(err.message); }
-            less
-                .render(contents.toString(), {
-                    filename: filePath,
-                    relativeUrls: true,
-                    sourceMap: {
-                        outputSourceFiles: true,
-                        sourceMapBasepath: serverPath,
-                        sourceMapFileInline: true
-                    }
-                })
-                .then(autoprefix)
-                .then(respond)
-                .catch(function (error) {
-                    error = JSON.stringify(error, null, 4)
-                        .replace(/\n/g, '\\A')
-                        .replace(/"/g, '\\"');
 
-                    res.end(outputStyleError(error));
-                });
-        }
-        fs.readFile(filePath, onLessfile);
+        return new Promise(function (resolve) {
+            function check() {
+                var styleMatch = styles.exec(vFile.source),
+                    styleContent = styleMatch && styleMatch[3],
+                    inlineFile;
+                if (!styleMatch) { return resolve(vFile); }
+                if (!styleContent) { return check(); }
+
+                inlineFile = {
+                    path: path.join(
+                        vPath.dir,
+                        vPath.name + '_style_' + styleMatch.index + '.css'
+                    ),
+                    source: styleContent
+                };
+                autoprefixCSS(inlineFile)
+                    .then(function (iFile) {
+                        vFile.source =
+                            replaceContent(styleContent, iFile.source);
+                        check();
+                    })
+                    .catch(function (error) {
+                        vFile.source = replaceContent(
+                            inlineFile.source,
+                            outputStyleError(error.message)
+                        );
+                        check();
+                    });
+            }
+            check();
+        });
     }
 
     function groupLinkTags(vFile) {
@@ -101,6 +139,22 @@ module.exports = function (serverPath) {
             }
             return m;
         });
+        return vFile;
+    }
+    function mergeInlineScripts(vFile) {
+        var tags = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
+            scripts = [];
+        vFile.source = vFile.source.replace(tags, function (m, t, a, content) {
+            if (content) {
+                content = '(function () { ' + content + '}());';
+                if (scripts.indexOf(content) === -1) {
+                    scripts.push(content);
+                }
+                return '';
+            }
+            return m;
+        });
+        vFile.source += '<script>' + scripts.join('\n\n') + '</script>';
         return vFile;
     }
 
@@ -195,23 +249,6 @@ module.exports = function (serverPath) {
             }
             check();
         });
-    }
-
-    function mergeInlineScripts(vFile) {
-        var tags = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
-            scripts = [];
-        vFile.source = vFile.source.replace(tags, function (m, t, a, content) {
-            if (content) {
-                content = '(function () { ' + content + '}());';
-                if (scripts.indexOf(content) === -1) {
-                    scripts.push(content);
-                }
-                return '';
-            }
-            return m;
-        });
-        vFile.source += '<script>' + scripts.join('\n\n') + '</script>';
-        return vFile;
     }
 
     function resolveFilePath(fileName, parentName) {
@@ -325,6 +362,11 @@ module.exports = function (serverPath) {
                 res.writeHead(statusCode || 200);
                 return res.end(data);
             }
+            function endCSS(vFile) {
+                res.setHeader('content-type', 'text/css');
+                res.setHeader('content-length', vFile.source.length);
+                res.end(vFile.source);
+            }
 
             var cURL = req.url.replace(/\/$/, '/index.html'),
                 filePath = url.parse(cURL).pathname,
@@ -335,14 +377,25 @@ module.exports = function (serverPath) {
                 return next();
             }
             if (ext.match(/\.less$/)) {
-                return compileLess(fileSrc, res);
+                return readFile(fileSrc)
+                    .catch((e) => { end(e, 404); })
+                    .then(lessify)
+                    .then(autoprefixCSS)
+                    .then(endCSS)
+                     .catch(function (error) {
+                         console.log("ERROR", error);
+                         error = JSON.stringify(error, null, 4)
+                            .replace(/\n/g, '\\A')
+                            .replace(/"/g, '\\"');
+                         res.end(outputStyleError(error));
+                     });
             } else if (ext.match(/\.js$/)) {
                 if (req.headers['x-requested-with'] === 'XMLHttpRequest') {
-                    f = readFile(fileSrc).catch((e) => { end(e, 404); })
+                    f = readFile(fileSrc).catch((e) => { end(e, 404); });
                 } else {
                     f = readFile(fileSrc)
                         .catch((e) => { end(e, 404); })
-                        .then(renegerate)
+                        .then(regenerate)
                         .then(babelPromise)
                         .then(browserifyPromise);
                 }
@@ -361,6 +414,7 @@ module.exports = function (serverPath) {
                     .then(replaceEnvVars)
                     //.then(mergeInlineScripts)
                     //.then(groupLinkTags)
+                    .then(processInlineStyles)
                     .then(processInlineScripts)
                     .then(outputSource)
                     .then(end)
