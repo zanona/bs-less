@@ -16,6 +16,18 @@ module.exports = function (serverPath) {
         postcss      = require('postcss'),
         marked       = require('marked').setOptions({smartypants: true});
 
+    function replaceMatch(match, newContent) {
+        const raw = match[0],
+            content = match[3],
+            input = match.input,
+            index = match.index,
+            pre = input.substring(0, index),
+            pos = input.substring(index + raw.length);
+
+        //replace through fn to avoid $n substitution
+        return pre + raw.replace(content, () => newContent) + pos;
+    }
+
     function outputSource(vFile) { return vFile.source; }
     function outputStyleError(msg) {
         return ''
@@ -81,22 +93,13 @@ module.exports = function (serverPath) {
         var styles = /<(style)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
             vPath = path.parse(vFile.path);
 
-        function replaceContent(original, bundle) {
-            return vFile.source.replace(original, function () {
-                /*SEND TO FUNCTION SO IT WON'T EVALUATE
-                * THINGS LIKE $1 $2 $$ WITHIN CONTENT*/
-                return bundle;
-            });
-        }
-
         return new Promise(function (resolve) {
             function check() {
                 var styleMatch = styles.exec(vFile.source),
                     styleContent = styleMatch && styleMatch[3],
                     inlineFile;
-                if (!styleMatch) { return resolve(vFile); }
+                if (!styleMatch)   { return resolve(vFile); }
                 if (!styleContent) { return check(); }
-
                 inlineFile = {
                     path: path.join(
                         vPath.dir,
@@ -106,8 +109,7 @@ module.exports = function (serverPath) {
                 };
                 autoprefixCSS(inlineFile)
                     .then(function (iFile) {
-                        vFile.source =
-                            replaceContent(styleContent, iFile.source);
+                        vFile.source = replaceMatch(styleMatch, iFile.source);
                         check();
                     })
                     .catch(function (error) {
@@ -209,14 +211,6 @@ module.exports = function (serverPath) {
         var scripts = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
             vPath = path.parse(vFile.path);
 
-        function replaceContent(original, bundle) {
-            return vFile.source.replace(original, function () {
-                /*SEND TO FUNCTION SO IT WON'T EVALUATE
-                * THINGS LIKE $1 $2 $$ WITHIN CONTENT*/
-                return bundle;
-            });
-        }
-
         return new Promise(function (resolve) {
             function check() {
                 var scriptMatch = scripts.exec(vFile.source),
@@ -237,7 +231,7 @@ module.exports = function (serverPath) {
                     .then(browserifyPromise)
                     .then(function (iFile) {
                         vFile.source =
-                            replaceContent(scriptContent, iFile.source);
+                            replaceMatch(scriptMatch, iFile.source);
                         check();
                     })
                     .catch(function (error) {
