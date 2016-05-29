@@ -14,11 +14,12 @@ module.exports = function (serverPath) {
         babelify     = require('babelify'),
         es2015       = require('babel-preset-es2015'),
         postcss      = require('postcss'),
-        marked       = require('marked').setOptions({smartypants: true});
+        marked       = require('marked').setOptions({smartypants: true}),
+        CACHE        = {};
 
-    function replaceMatch(match, newContent) {
+    function replaceMatch(match, newContent, groupIndex) {
         const raw = match[0],
-            content = match[3],
+            content = match[groupIndex || 0],
             input = match.input,
             index = match.index,
             pre = input.substring(0, index),
@@ -28,7 +29,6 @@ module.exports = function (serverPath) {
         return pre + raw.replace(content, () => newContent) + pos;
     }
 
-    function outputSource(vFile) { return vFile.source; }
     function outputStyleError(msg) {
         return ''
             + 'html:before {'
@@ -46,8 +46,8 @@ module.exports = function (serverPath) {
             + '  z-index: 10000'
             + '}';
     }
-    function outputJSError(err) {
-        var error = err.stack
+    function outputJSError(msg) {
+        var error = msg
             .replace(/"/g, '\\"')
             .replace(/\n/g, '\\n');
         return 'console.error("' + error  + '");';
@@ -69,7 +69,9 @@ module.exports = function (serverPath) {
                 vFile.source = post.css;
                 resolve(vFile);
             } catch (e) {
-                reject(e);
+                vFile.source = e.message;
+                vFile.error = true;
+                reject(vFile);
             }
         });
     }
@@ -86,7 +88,11 @@ module.exports = function (serverPath) {
             }).then((out) => {
                 vFile.source = out.css;
                 resolve(vFile);
-            }).catch(reject);
+            }).catch((e) => {
+                vFile.error = true;
+                vFile.source = e.message;
+                reject(vFile);
+            });
         });
     }
     function processInlineStyles(vFile) {
@@ -109,13 +115,14 @@ module.exports = function (serverPath) {
                 };
                 autoprefixCSS(inlineFile)
                     .then(function (iFile) {
-                        vFile.source = replaceMatch(styleMatch, iFile.source);
+                        vFile.source = replaceMatch(styleMatch, iFile.source, 3);
                         check();
                     })
-                    .catch(function (error) {
-                        vFile.source = replaceContent(
-                            inlineFile.source,
-                            outputStyleError(error.message)
+                    .catch(function (errorFile) {
+                        vFile.source = replaceMatch(
+                            styleMatch,
+                            outputStyleError(errorFile.source),
+                            3
                         );
                         check();
                     });
@@ -166,7 +173,11 @@ module.exports = function (serverPath) {
                 vFile.source = regenerator.compile(vFile.source).code;
                 resolve(vFile);
             } catch (e) {
-                reject(e);
+                reject({
+                    error: true,
+                    path: vFile.path,
+                    source: e.message
+                });
             }
         });
     }
@@ -179,7 +190,11 @@ module.exports = function (serverPath) {
                 }).code;
                 resolve(vFile);
             } catch (e) {
-                reject(e);
+                reject({
+                    error: true,
+                    path: vFile.path,
+                    source: e.message
+                });
             }
         });
     }
@@ -199,7 +214,13 @@ module.exports = function (serverPath) {
                     presets: [es2015]
                 })
                 .bundle(function (err, bundle) {
-                    if (err) { return reject(err); }
+                    if (err) {
+                        return reject({
+                            error: true,
+                            path: vFile.path,
+                            source: err.message
+                        });
+                    }
                     resolve({
                         path: vFile.path,
                         source: bundle.toString()
@@ -231,13 +252,15 @@ module.exports = function (serverPath) {
                     .then(browserifyPromise)
                     .then(function (iFile) {
                         vFile.source =
-                            replaceMatch(scriptMatch, iFile.source);
+                            replaceMatch(scriptMatch, iFile.source, 3);
                         check();
                     })
-                    .catch(function (error) {
+                    .catch(function (errorFile) {
                         vFile.source =
-                            replaceContent(
-                                inlineFile.source, outputJSError(error));
+                            replaceMatch(
+                                scriptMatch,
+                                outputJSError(errorFile.source),
+                                3);
                         check();
                     });
             }
@@ -298,18 +321,16 @@ module.exports = function (serverPath) {
         var pattern = /<!--#include file=[\"\']?(.+?)[\"\']? -->/g;
         return new Promise(function (resolve) {
             function check (match) {
-                if (!match) { resolve(vFile); }
+                if (!match) { return resolve(vFile); }
                 readFile(resolveFilePath(match[1], vFile.path))
                     .then(adjustFilePaths)
                     //.then(processInlineScripts)
                     .then(replaceSSI)
                     .then(replaceEnvVars)
                     .then(function ($vFile) {
-                        vFile.source = vFile.source
-                            .replace(match[0], function () {
-                                return $vFile.source;
-                            });
+                        vFile.source = replaceMatch(match, $vFile.source);
                         check(pattern.exec(vFile.source));
+                        return vFile;
                     })
                     .catch(function (e) {
                         vFile.source = vFile.source
@@ -321,6 +342,58 @@ module.exports = function (serverPath) {
         });
     }
 
+    function cachefy(vFile) {
+        if (vFile.error) { console.error('FOUND ERROR:', vFile); }
+        CACHE[vFile.path] = vFile;
+        return vFile;
+    }
+
+    function processHTML(eventName, filePath) {
+        readFile(filePath)
+            /* MUST PROCESS INLINE SCRIPTS BEFORE SSI IS EXPANDED,
+             * SINCE IT COULD GENERATE ADDITIONAL INLINE SCRIPTS
+             * */
+            .then(replaceSSI)
+            .then(replaceEnvVars)
+            //.then(mergeInlineScripts)
+            //.then(groupLinkTags)
+            .then(processInlineStyles)
+            .then(processInlineScripts)
+            .then(cachefy)
+            .then(() => this.reload(filePath));
+    }
+    function processJS(eventName, filePath) {
+        readFile(filePath)
+            .then(regenerate)
+            .then(babelPromise)
+            .then(browserifyPromise)
+            .then(replaceEnvVars)
+            .catch(function (errorFile) {
+                errorFile.source = outputJSError(errorFile.source);
+                return errorFile;
+            })
+            .then(cachefy)
+            .then(() => this.reload(filePath));
+    }
+    function processLESS(eventName, filePath) {
+        readFile(filePath)
+            .then(lessify)
+            .then(autoprefixCSS)
+            .then((vFile) => {
+                vFile.mimeType = 'text/css';
+                return vFile;
+            })
+            .catch(function (errorFile) {
+                errorFile.source = JSON.stringify(errorFile.source, null, 4)
+                   .replace(/\n/g, '\\A')
+                   .replace(/"/g, '\\"');
+                errorFile.source = outputStyleError(errorFile.source);
+                return errorFile;
+            })
+            .then(cachefy)
+            .then(() => this.reload(filePath));
+    }
+
     bs.init({
         browser: 'google chrome',
         open: false,
@@ -329,93 +402,53 @@ module.exports = function (serverPath) {
         minify: false,
         server: serverPath,
         files: [
-            serverPath + '*.html',
-            serverPath + 'lib/**.html',
-            serverPath + '*.js',
-            serverPath + 'scripts/*.js',
-            serverPath + 'lib/**.js',
             {
-                options: { ignoreInitial: true },
+                options: { ignoreInitial: false },
+                match: [
+                    serverPath + '*.html',
+                    serverPath + 'lib/*.html',
+                    serverPath + 'lib/**.html'
+                ],
+                fn: processHTML
+            },
+            {
+                options: { ignoreInitial: false },
+                match: [
+                    serverPath + '*.js',
+                    serverPath + 'scripts/*.js',
+                    serverPath + 'lib/*.js',
+                    serverPath + 'lib/*/*.js'
+                ],
+                fn: processJS
+            },
+            {
+                options: { ignoreInitial: false },
                 match: [
                     serverPath + '*.less',
-                    serverPath + '*/*.less',
-                    serverPath + 'lib/**.less'
+                    serverPath + 'lib/*.less',
+                    serverPath + 'lib/*/*.less'
                 ],
-                fn: function (event) {
-                    if (event !== 'change') { return; }
-                    //this.reload(path.relative(serverPath, filePath));
-                    this.reload('*.less');
-                }
+                fn: processLESS
             }
         ],
         injectFileTypes: ['less'],
         middleware: function (req, res, next) {
-            // It seems there's problem when using BS .then(res.end)
-            // creating my own method
-            function end(data, statusCode) {
-                res.writeHead(statusCode || 200);
-                return res.end(data);
-            }
-            function endCSS(vFile) {
-                res.setHeader('content-type', 'text/css');
-                res.setHeader('content-length', vFile.source.length);
-                res.end(vFile.source);
-            }
 
             var cURL = req.url.replace(/\/$/, '/index.html'),
                 filePath = url.parse(cURL).pathname,
                 fileSrc = path.join(serverPath, filePath),
-                ext = path.extname(filePath),
-                f;
-            if (filePath.match(/bower_components|node_modules/)) {
-                return next();
+                cachedVersion = CACHE[fileSrc],
+                isDependency = filePath.match(/bower_components|node_modules/),
+                isXHR = req.headers['x-requested-with'] === 'XMLHttpRequest';
+
+            if (isXHR || isDependency || !cachedVersion) { return next(); }
+
+            if (cachedVersion.mimeType) {
+                res.setHeader('content-type', cachedVersion.mimeType);
             }
-            if (ext.match(/\.less$/)) {
-                return readFile(fileSrc)
-                    .catch((e) => { end(e, 404); })
-                    .then(lessify)
-                    .then(autoprefixCSS)
-                    .then(endCSS)
-                     .catch(function (error) {
-                         console.log("ERROR", error);
-                         error = JSON.stringify(error, null, 4)
-                            .replace(/\n/g, '\\A')
-                            .replace(/"/g, '\\"');
-                         res.end(outputStyleError(error));
-                     });
-            } else if (ext.match(/\.js$/)) {
-                if (req.headers['x-requested-with'] === 'XMLHttpRequest') {
-                    f = readFile(fileSrc).catch((e) => { end(e, 404); });
-                } else {
-                    f = readFile(fileSrc)
-                        .catch((e) => { end(e, 404); })
-                        .then(regenerate)
-                        .then(babelPromise)
-                        .then(browserifyPromise);
-                }
-                f.then(replaceEnvVars)
-                 .then(outputSource)
-                 .then(end)
-                 .catch(function (e) {
-                     res.end(outputJSError(e)); });
-            } else if (ext.match(/\.html$/)) {
-                return readFile(fileSrc)
-                    .catch((e) => { end(e, 404); })
-                    /* MUST PROCESS INLINE SCRIPTS BEFORE SSI IS EXPANDED,
-                     * SINCE IT COULD GENERATE ADDITIONAL INLINE SCRIPTS
-                     * */
-                    .then(replaceSSI)
-                    .then(replaceEnvVars)
-                    //.then(mergeInlineScripts)
-                    //.then(groupLinkTags)
-                    .then(processInlineStyles)
-                    .then(processInlineScripts)
-                    .then(outputSource)
-                    .then(end)
-                    .catch(end);
-            } else {
-                next();
-            }
+            res.setHeader('content-length', cachedVersion.source.length);
+            res.writeHead(200);
+            return res.end(cachedVersion.source);
         },
         snippetOptions: {
             rule: {
