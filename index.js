@@ -375,6 +375,19 @@ module.exports = function (serverPath) {
             .then(cachefy)
             .then(() => this.reload(filePath));
     }
+    function processCSS(eventName, filePath) {
+        readFile(filePath)
+            .then(autoprefixCSS)
+            .catch(function (errorFile) {
+                errorFile.source = JSON.stringify(errorFile.source, null, 4)
+                   .replace(/\n/g, '\\A')
+                   .replace(/"/g, '\\"');
+                errorFile.source = outputStyleError(errorFile.source);
+                return errorFile;
+            })
+            .then(cachefy)
+            .then(() => this.reload(filePath));
+    }
     function processLESS(eventName, filePath) {
         readFile(filePath)
             .then(lessify)
@@ -424,6 +437,15 @@ module.exports = function (serverPath) {
             {
                 options: { ignoreInitial: false },
                 match: [
+                    serverPath + '*.css',
+                    serverPath + 'lib/*.css',
+                    serverPath + 'lib/*/*.css'
+                ],
+                fn: processCSS
+            },
+            {
+                options: { ignoreInitial: false },
+                match: [
                     serverPath + '*.less',
                     serverPath + 'lib/*.less',
                     serverPath + 'lib/*/*.less'
@@ -431,7 +453,7 @@ module.exports = function (serverPath) {
                 fn: processLESS
             }
         ],
-        injectFileTypes: ['less'],
+        injectFileTypes: ['css', 'less'],
         middleware: function (req, res, next) {
 
             var cURL = req.url.replace(/\/$/, '/index.html'),
