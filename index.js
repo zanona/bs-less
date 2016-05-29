@@ -97,11 +97,12 @@ module.exports = function (serverPath) {
     }
     function processInlineStyles(vFile) {
         var styles = /<(style)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
-            vPath = path.parse(vFile.path);
+            vPath = path.parse(vFile.path),
+            vSource = vFile.source;
 
         return new Promise(function (resolve) {
             function check() {
-                var styleMatch = styles.exec(vFile.source),
+                var styleMatch = styles.exec(vSource),
                     styleContent = styleMatch && styleMatch[3],
                     inlineFile;
                 if (!styleMatch)   { return resolve(vFile); }
@@ -230,11 +231,12 @@ module.exports = function (serverPath) {
     }
     function processInlineScripts(vFile) {
         var scripts = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
-            vPath = path.parse(vFile.path);
+            vPath = path.parse(vFile.path),
+            vSource = vFile.source;
 
         return new Promise(function (resolve) {
             function check() {
-                var scriptMatch = scripts.exec(vFile.source),
+                var scriptMatch = scripts.exec(vSource),
                     scriptContent = scriptMatch && scriptMatch[3],
                     inlineFile;
                 if (!scriptMatch) { return resolve(vFile); }
@@ -360,6 +362,7 @@ module.exports = function (serverPath) {
             .then(processInlineStyles)
             .then(processInlineScripts)
             .then(cachefy)
+            .then((vFile) => { this.sockets.emit('html', vFile); })
             .then(() => this.reload(filePath));
     }
     function processJS(eventName, filePath) {
@@ -453,7 +456,7 @@ module.exports = function (serverPath) {
                 fn: processLESS
             }
         ],
-        injectFileTypes: ['css', 'less'],
+        injectFileTypes: ['html', 'css', 'less'],
         middleware: function (req, res, next) {
 
             var cURL = req.url.replace(/\/$/, '/index.html'),
