@@ -18,6 +18,14 @@ module.exports = function (serverPath) {
         marked       = require('marked').setOptions({smartypants: true}),
         CACHE        = {};
 
+    function resolveFilePath(fileName, parentName) {
+        var dir = path.dirname(parentName);
+        fileName = path.join(dir, fileName);
+        if (!path.extname(fileName)) {
+            return path.join(fileName, 'index.html');
+        }
+        return fileName;
+    }
     function replaceMatch(match, newContent, groupIndex) {
         const raw = match[0],
             content = match[groupIndex || 0],
@@ -28,6 +36,42 @@ module.exports = function (serverPath) {
 
         //replace through fn to avoid $n substitution
         return pre + raw.replace(content, () => newContent) + pos;
+    }
+    function adjustFilePaths(vFile) {
+        var links = /(?:src|href)=['"]?(.+?)['">\s]/g,
+            requires = /require\(['"](\..*?)['"]\)/g;
+        return new Promise(function (resolve) {
+            vFile.source = vFile.source.replace(links, function (m, src) {
+                if (src.match(/^(\w+:|#|\/)/)) { return m; }
+                var resolved = resolveFilePath(src, vFile.path);
+                return m.replace(src, resolved);
+            }).replace(requires, function (m, src) {
+                var resolved = './' + resolveFilePath(src, vFile.path)
+                    .replace('/index.html', '');
+                return m.replace(src, resolved);
+            });
+            resolve(vFile);
+        });
+    }
+    function readFile(filePath) {
+        return new Promise(function (resolve, reject) {
+            function onFile(err, contents) {
+                if (err) { return reject(err.message); }
+                if (path.extname(filePath).match(/\.(md|mardown|mdown)/)) {
+                    contents = marked(contents.toString());
+                }
+                resolve({
+                    path: filePath,
+                    source: contents.toString()
+                });
+            }
+            fs.readFile(filePath, onFile);
+        });
+    }
+    function getElementType(attrs) {
+        attrs = attrs || '';
+        const match = attrs.match(/\btype=["']?\w+\/(\w+)\b["']?/);
+        return match && match[1];
     }
 
     function outputStyleError(msg) {
@@ -54,11 +98,41 @@ module.exports = function (serverPath) {
         return 'console.error("' + error  + '");';
     }
 
-    function getStyleType(attrs) {
-        attrs = attrs || '';
-        const match = attrs.match(/\btype=["']?text\/(\w+)\b["']?/);
-        return match && match[1] || 'css';
+    function replaceEnvVars(vFile) {
+        var pattern = /\$ENV\[['"]?([\w\.\-\/@]+?)['"]?\]/g;
+        return new Promise(function (resolve) {
+            vFile.source = vFile.source.replace(pattern, function (_, v) {
+                return process.env[v] || '';
+            });
+            resolve(vFile);
+        });
     }
+    function replaceSSI(vFile) {
+        // more http://www.w3.org/Jigsaw/Doc/User/SSI.html#include
+        var pattern = /<!--#include file=[\"\']?(.+?)[\"\']? -->/g;
+        return new Promise(function (resolve) {
+            function check (match) {
+                if (!match) { return resolve(vFile); }
+                readFile(resolveFilePath(match[1], vFile.path))
+                    .then(adjustFilePaths)
+                    //.then(processInlineScripts)
+                    .then(replaceSSI)
+                    .then(replaceEnvVars)
+                    .then(function ($vFile) {
+                        vFile.source = replaceMatch(match, $vFile.source);
+                        check(pattern.exec(vFile.source));
+                        return vFile;
+                    })
+                    .catch(function (e) {
+                        vFile.source = vFile.source
+                        .replace(match[0], function () { return e; });
+                        check(pattern.exec(vFile.source));
+                    });
+            }
+            check(pattern.exec(vFile.source));
+        });
+    }
+
     function autoprefixCSS(vFile) {
         return new Promise((resolve, reject) => {
             try {
@@ -119,47 +193,8 @@ module.exports = function (serverPath) {
                 return errorFile;
             });
     }
-    function processInlineStyles(vFile) {
-        var styles = /<(style)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
-            vPath = path.parse(vFile.path),
-            vSource = vFile.source;
 
-        return new Promise(function (resolve) {
-            function check() {
-                var styleMatch = styles.exec(vSource),
-                    styleContent = styleMatch && styleMatch[3],
-                    styleFormat,
-                    inlineFile;
-
-                if (!styleMatch)   { return resolve(vFile); }
-                if (!styleContent) { return check(); }
-
-                styleFormat = getStyleType(styleMatch[2]);
-                inlineFile = {
-                    path: path.join(
-                        vPath.dir,
-                        `${vPath.name}_style_${styleMatch.index}.${styleFormat}`
-                    ),
-                    source: styleContent
-                };
-                processStyle(inlineFile)
-                    .then(function (iFile) {
-                        vFile.source = replaceMatch(styleMatch, iFile.source, 3);
-                        check();
-                    })
-                    .catch(function (errorFile) {
-                        vFile.source = replaceMatch(
-                            styleMatch,
-                            outputStyleError(errorFile.source),
-                            3
-                        );
-                        check();
-                    });
-            }
-            check();
-        });
-    }
-
+    /*
     function groupLinkTags(vFile) {
         var tags = /<link .*(?:src|href)=['"]?([\w\.]+)['"]?.*>/g,
             head = /(<\/title>|<meta .*>)|(<\/head>|<body|<script)/,
@@ -195,6 +230,7 @@ module.exports = function (serverPath) {
         vFile.source += '<script>' + scripts.join('\n\n') + '</script>';
         return vFile;
     }
+    */
 
     function regenerate(vFile) {
         return new Promise((resolve, reject) => {
@@ -257,119 +293,49 @@ module.exports = function (serverPath) {
                 });
         });
     }
+    function processJS(vFile) {
+        return regenerate(vFile)
+            .then(babelPromise)
+            .then(browserifyPromise)
+            .then(replaceEnvVars)
+            .catch(function (errorFile) {
+                errorFile.source = outputJSError(errorFile.source);
+                return errorFile;
+            });
+    }
+
     function processInlineScripts(vFile) {
-        var scripts = /<(script)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
+        var stylePattern = /<(style)\b([^>]*)>([\s\S]*?)<\/\1>?/gmi,
+            scriptPattern = /<(script)\b([^>]*)>([\s\S]*?)<\/\1>?/gmi,
             vPath = path.parse(vFile.path),
-            vSource = vFile.source;
+            queue = [];
 
-        return new Promise(function (resolve) {
-            function check() {
-                var scriptMatch = scripts.exec(vSource),
-                    scriptContent = scriptMatch && scriptMatch[3],
-                    inlineFile;
-                if (!scriptMatch) { return resolve(vFile); }
-                if (!scriptContent) { return check(); }
-
-                inlineFile = {
-                    path: path.join(
-                        vPath.dir,
-                        vPath.name + '_script_' + scriptMatch.index + '.js'
-                    ),
-                    source: scriptContent
+        function replaceTags(match, tag, attrs, content, index) {
+            const format = getElementType(attrs) || (tag === 'script' ? 'js' : 'css'),
+                iFile = {
+                    type: tag,
+                    path: path.join(vPath.dir, `${vPath.name}_${tag}_${index}.${format}`),
+                    source: content
                 };
-                regenerate(inlineFile)
-                    .then(babelPromise)
-                    .then(browserifyPromise)
-                    .then(function (iFile) {
-                        vFile.source =
-                            replaceMatch(scriptMatch, iFile.source, 3);
-                        check();
-                    })
-                    .catch(function (errorFile) {
-                        vFile.source =
-                            replaceMatch(
-                                scriptMatch,
-                                outputJSError(errorFile.source),
-                                3);
-                        check();
-                    });
-            }
-            check();
-        });
-    }
-
-    function resolveFilePath(fileName, parentName) {
-        var dir = path.dirname(parentName);
-        fileName = path.join(dir, fileName);
-        if (!path.extname(fileName)) {
-            return path.join(fileName, 'index.html');
+            queue.push(iFile);
+            return match.replace(content, '@{' + iFile.path + '}');
         }
-        return fileName;
-    }
-    function readFile(filePath) {
-        return new Promise(function (resolve, reject) {
-            function onFile(err, contents) {
-                if (err) { return reject(err.message); }
-                if (path.extname(filePath).match(/\.(md|mardown|mdown)/)) {
-                    contents = marked(contents.toString());
-                }
-                resolve({
-                    path: filePath,
-                    source: contents.toString()
-                });
-            }
-            fs.readFile(filePath, onFile);
-        });
-    }
-    function replaceEnvVars(vFile) {
-        var pattern = /\$ENV\[['"]?([\w\.\-\/@]+?)['"]?\]/g;
-        return new Promise(function (resolve) {
-            vFile.source = vFile.source.replace(pattern, function (_, v) {
-                return process.env[v] || '';
-            });
-            resolve(vFile);
-        });
-    }
-    function adjustFilePaths(vFile) {
-        var links = /(?:src|href)=['"]?(.+?)['">\s]/g,
-            requires = /require\(['"](\..*?)['"]\)/g;
-        return new Promise(function (resolve) {
-            vFile.source = vFile.source.replace(links, function (m, src) {
-                if (src.match(/^(\w+:|#|\/)/)) { return m; }
-                var resolved = resolveFilePath(src, vFile.path);
-                return m.replace(src, resolved);
-            }).replace(requires, function (m, src) {
-                var resolved = './' + resolveFilePath(src, vFile.path)
-                    .replace('/index.html', '');
-                return m.replace(src, resolved);
-            });
-            resolve(vFile);
-        });
-    }
-    function replaceSSI(vFile) {
-        // more http://www.w3.org/Jigsaw/Doc/User/SSI.html#include
-        var pattern = /<!--#include file=[\"\']?(.+?)[\"\']? -->/g;
-        return new Promise(function (resolve) {
-            function check (match) {
-                if (!match) { return resolve(vFile); }
-                readFile(resolveFilePath(match[1], vFile.path))
-                    .then(adjustFilePaths)
-                    //.then(processInlineScripts)
-                    .then(replaceSSI)
-                    .then(replaceEnvVars)
-                    .then(function ($vFile) {
-                        vFile.source = replaceMatch(match, $vFile.source);
-                        check(pattern.exec(vFile.source));
-                        return vFile;
-                    })
-                    .catch(function (e) {
-                        vFile.source = vFile.source
-                        .replace(match[0], function () { return e; });
-                        check(pattern.exec(vFile.source));
+        function next(iFile) {
+            return new Promise((resolve) => {
+                if (!iFile) { return resolve(vFile); }
+                const p = iFile.type === 'style' ? processStyle(iFile) : processJS(iFile);
+                p.then((mFile) => {
+                    vFile.source = vFile.source.replace(`@{${iFile.path}}`, () => {
+                        return mFile.source;
                     });
-            }
-            check(pattern.exec(vFile.source));
-        });
+                    resolve(next(queue.shift()));
+                });
+            });
+        }
+
+        vFile.source = vFile.source.replace(stylePattern, replaceTags);
+        vFile.source = vFile.source.replace(scriptPattern, replaceTags);
+        return next(queue.shift());
     }
 
     function getDiff(a, b) {
@@ -401,8 +367,8 @@ module.exports = function (serverPath) {
                     type,
                     was: a[index],
                     became: b[index],
-                    attributes: source && source[1],
-                    source: source && source[2]
+                    attributes: source && (source[1] || source[3]),
+                    source: source && (source[2] || source[4])
                 });
             }
         });
@@ -422,7 +388,7 @@ module.exports = function (serverPath) {
         const changes = getDiff(CACHE[vFile.path].source, vFile.source);
 
         if (changes.type === 'style') {
-            const format = getStyleType(changes[0].attributes);
+            const format = getElementType(changes[0].attributes) || 'css';
             return processStyle({
                 path: vFile.path.replace('.html', '.' + format),
                 source: changes[0].source
@@ -440,7 +406,6 @@ module.exports = function (serverPath) {
             .then(replaceEnvVars)
             //.then(mergeInlineScripts)
             //.then(groupLinkTags)
-            .then(processInlineStyles)
             .then(processInlineScripts)
             .then(broadcastChanges.bind(this))
             .then(cachefy)
