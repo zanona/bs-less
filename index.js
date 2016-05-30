@@ -387,6 +387,7 @@ module.exports = function (serverPath) {
         if (!CACHE[vFile.path]) { return vFile; }
         const changes = getDiff(CACHE[vFile.path].source, vFile.source);
 
+        if (!changes.length) { vFile.broadcast = true; }
         if (changes.type === 'style') {
             const format = getElementType(changes[0].attributes) || 'css';
             return processStyle({
