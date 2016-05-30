@@ -1,5 +1,6 @@
 /*eslint indent:[1,4]*/
 module.exports = function (serverPath) {
+    'use strict';
 
     var path         = require('path'),
         fs           = require('fs'),
@@ -53,6 +54,11 @@ module.exports = function (serverPath) {
         return 'console.error("' + error  + '");';
     }
 
+    function getStyleType(attrs) {
+        attrs = attrs || '';
+        const match = attrs.match(/\btype=["']?text\/(\w+)\b["']?/);
+        return match && match[1] || 'css';
+    }
     function autoprefixCSS(vFile) {
         return new Promise((resolve, reject) => {
             try {
@@ -95,6 +101,24 @@ module.exports = function (serverPath) {
             });
         });
     }
+    function processStyle(vFile) {
+        var ext = path.extname(vFile.path),
+            promise = new Promise((r) => r(vFile));
+        if (ext === '.less') { promise = lessify(vFile); }
+        return promise
+            .then(autoprefixCSS)
+            .then((metaFile) => {
+                metaFile.mimeType = 'text/css';
+                return metaFile;
+            })
+            .catch(function (errorFile) {
+                errorFile.source = JSON.stringify(errorFile.source, null, 4)
+                   .replace(/\n/g, '\\A')
+                   .replace(/"/g, '\\"');
+                errorFile.source = outputStyleError(errorFile.source);
+                return errorFile;
+            });
+    }
     function processInlineStyles(vFile) {
         var styles = /<(style)\b([^>]*)>(?:([\s\S]*?)<\/\1>)?/gmi,
             vPath = path.parse(vFile.path),
@@ -104,17 +128,21 @@ module.exports = function (serverPath) {
             function check() {
                 var styleMatch = styles.exec(vSource),
                     styleContent = styleMatch && styleMatch[3],
+                    styleFormat,
                     inlineFile;
+
                 if (!styleMatch)   { return resolve(vFile); }
                 if (!styleContent) { return check(); }
+
+                styleFormat = getStyleType(styleMatch[2]);
                 inlineFile = {
                     path: path.join(
                         vPath.dir,
-                        vPath.name + '_style_' + styleMatch.index + '.css'
+                        `${vPath.name}_style_${styleMatch.index}.${styleFormat}`
                     ),
                     source: styleContent
                 };
-                autoprefixCSS(inlineFile)
+                processStyle(inlineFile)
                     .then(function (iFile) {
                         vFile.source = replaceMatch(styleMatch, iFile.source, 3);
                         check();
@@ -344,28 +372,84 @@ module.exports = function (serverPath) {
         });
     }
 
+    function getDiff(a, b) {
+        const styles = /(<style\b[^>]*>[\s\S]*?<\/style>?)|(<script\b[^>]*>[\s\S]*?<\/script>?)/,
+            contentMatch = /<style\b([^>]*)>([\s\S]*?)<\/style>|<script\b[^>]*>([\s\S]*?)<\/script>?/,
+            changes = [];
+
+        a = a.split(styles).filter((i) => i);
+        b = b.split(styles).filter((i) => i);
+
+        a.forEach((line, index) => {
+            if(b[index] !== line) {
+                const source = b[index].match(contentMatch);
+                let type;
+                if (line.match('<script')) {
+                    if (!changes.type) changes.type = 'script';
+                    if (changes.type !== 'script') changes.type = 'mixed';
+                    type = 'script';
+                } else if (line.match('<style')) {
+                    if (!changes.type) changes.type = 'style';
+                    if (changes.type !== 'style') changes.type = 'mixed';
+                    type = 'style';
+                } else {
+                    if (!changes.type) changes.type = 'dom';
+                    if (changes.type !== 'dom') changes.type = 'mixed';
+                    type = 'dom';
+                }
+                changes.push({
+                    type,
+                    was: a[index],
+                    became: b[index],
+                    attributes: source && source[1],
+                    source: source && source[2]
+                });
+            }
+        });
+
+        return changes;
+    }
     function cachefy(vFile) {
+        const broadcast = vFile.broadcast;
+        delete vFile.broadcast;
         if (vFile.error) { console.error('FOUND ERROR:', vFile); }
         CACHE[vFile.path] = vFile;
-        return vFile;
+        return !!broadcast;
     }
 
-    function processHTML(eventName, filePath) {
+    function broadcastChanges(vFile) {
+        if (!CACHE[vFile.path]) { return vFile; }
+        const changes = getDiff(CACHE[vFile.path].source, vFile.source);
+
+        if (changes.type === 'style') {
+            const format = getStyleType(changes[0].attributes);
+            return processStyle({
+                path: vFile.path.replace('.html', '.' + format),
+                source: changes[0].source
+            }).then((nFile) => {
+                this.sockets.emit('css', nFile);
+                vFile.broadcast = true;
+                return vFile;
+            });
+        }
+        return vFile;
+    }
+    function onHTMLChange(eventName, filePath) {
         readFile(filePath)
-            /* MUST PROCESS INLINE SCRIPTS BEFORE SSI IS EXPANDED,
-             * SINCE IT COULD GENERATE ADDITIONAL INLINE SCRIPTS
-             * */
             .then(replaceSSI)
             .then(replaceEnvVars)
             //.then(mergeInlineScripts)
             //.then(groupLinkTags)
             .then(processInlineStyles)
             .then(processInlineScripts)
+            .then(broadcastChanges.bind(this))
             .then(cachefy)
-            .then((vFile) => { this.sockets.emit('html', vFile); })
-            .then(() => this.reload(filePath));
+            .then((isBroadcast) => {
+                if (!isBroadcast) { this.reload(filePath); }
+            })
+            .catch(console.error);
     }
-    function processJS(eventName, filePath) {
+    function onJSChange(eventName, filePath) {
         readFile(filePath)
             .then(regenerate)
             .then(babelPromise)
@@ -378,34 +462,9 @@ module.exports = function (serverPath) {
             .then(cachefy)
             .then(() => this.reload(filePath));
     }
-    function processCSS(eventName, filePath) {
+    function onStyleChange(eventName, filePath) {
         readFile(filePath)
-            .then(autoprefixCSS)
-            .catch(function (errorFile) {
-                errorFile.source = JSON.stringify(errorFile.source, null, 4)
-                   .replace(/\n/g, '\\A')
-                   .replace(/"/g, '\\"');
-                errorFile.source = outputStyleError(errorFile.source);
-                return errorFile;
-            })
-            .then(cachefy)
-            .then(() => this.reload(filePath));
-    }
-    function processLESS(eventName, filePath) {
-        readFile(filePath)
-            .then(lessify)
-            .then(autoprefixCSS)
-            .then((vFile) => {
-                vFile.mimeType = 'text/css';
-                return vFile;
-            })
-            .catch(function (errorFile) {
-                errorFile.source = JSON.stringify(errorFile.source, null, 4)
-                   .replace(/\n/g, '\\A')
-                   .replace(/"/g, '\\"');
-                errorFile.source = outputStyleError(errorFile.source);
-                return errorFile;
-            })
+            .then(processStyle)
             .then(cachefy)
             .then(() => this.reload(filePath));
     }
@@ -425,7 +484,7 @@ module.exports = function (serverPath) {
                     serverPath + 'lib/*.html',
                     serverPath + 'lib/**.html'
                 ],
-                fn: processHTML
+                fn: onHTMLChange
             },
             {
                 options: { ignoreInitial: false },
@@ -435,28 +494,19 @@ module.exports = function (serverPath) {
                     serverPath + 'lib/*.js',
                     serverPath + 'lib/*/*.js'
                 ],
-                fn: processJS
+                fn: onJSChange
             },
             {
                 options: { ignoreInitial: false },
                 match: [
-                    serverPath + '*.css',
-                    serverPath + 'lib/*.css',
-                    serverPath + 'lib/*/*.css'
+                    serverPath + '*.{css,less}',
+                    serverPath + 'lib/*.{css,less}',
+                    serverPath + 'lib/*/*.{css,less}'
                 ],
-                fn: processCSS
-            },
-            {
-                options: { ignoreInitial: false },
-                match: [
-                    serverPath + '*.less',
-                    serverPath + 'lib/*.less',
-                    serverPath + 'lib/*/*.less'
-                ],
-                fn: processLESS
+                fn: onStyleChange
             }
         ],
-        injectFileTypes: ['html', 'css', 'less'],
+        injectFileTypes: ['css', 'less'],
         middleware: function (req, res, next) {
 
             var cURL = req.url.replace(/\/$/, '/index.html'),
@@ -471,7 +521,6 @@ module.exports = function (serverPath) {
             if (cachedVersion.mimeType) {
                 res.setHeader('content-type', cachedVersion.mimeType);
             }
-            res.setHeader('content-length', cachedVersion.source.length);
             res.writeHead(200);
             return res.end(cachedVersion.source);
         },
