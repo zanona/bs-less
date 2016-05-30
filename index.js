@@ -76,7 +76,7 @@ module.exports = function (serverPath) {
 
     function outputStyleError(msg) {
         return ''
-            + 'html:before {'
+            + 'root:before, :host:before {'
             + '  content: "STYLE ERROR: ' + msg + '";'
             + '  position: fixed;'
             + '  font: 1em/1.5 monospace'
