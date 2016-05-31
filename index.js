@@ -341,37 +341,61 @@ module.exports = function (serverPath) {
     function getDiff(a, b) {
         const styles = /(<style\b[^>]*>[\s\S]*?<\/style>?)|(<script\b[^>]*>[\s\S]*?<\/script>?)/,
             contentMatch = /<style\b([^>]*)>([\s\S]*?)<\/style>|<script\b[^>]*>([\s\S]*?)<\/script>?/,
-            changes = [];
+            changes = [],
+            linesA  = a.split(styles).filter((i) => i),
+            linesB  = b.split(styles).filter((i) => i);
 
-        a = a.split(styles).filter((i) => i);
-        b = b.split(styles).filter((i) => i);
+        function setChangeType(line) {
+            if (!line) { return; }
+            let type;
+            if (line.match('<script')) {
+                type = 'script';
+            } else if (line.match('<style')) {
+                type = 'style';
+            } else {
+                type = 'dom';
+            }
+            return type;
+        }
+        function getAttributesFromLine(line) {
+            if (!line) { return; }
+            var match = line.match(contentMatch);
+            return match && (match[1] || match[3]);
+        }
+        function getSourceFromLine(line) {
+            if (!line) { return; }
+            var match = line.match(contentMatch);
+            return match && (match[2] || match[4]);
+        }
 
-        a.forEach((line, index) => {
-            if(b[index] !== line) {
-                const source = b[index].match(contentMatch);
-                let type;
-                if (line.match('<script')) {
-                    if (!changes.type) changes.type = 'script';
-                    if (changes.type !== 'script') changes.type = 'mixed';
-                    type = 'script';
-                } else if (line.match('<style')) {
-                    if (!changes.type) changes.type = 'style';
-                    if (changes.type !== 'style') changes.type = 'mixed';
-                    type = 'style';
-                } else {
-                    if (!changes.type) changes.type = 'dom';
-                    if (changes.type !== 'dom') changes.type = 'mixed';
-                    type = 'dom';
-                }
+        function addTypeToChanges(type) {
+            if (!changes.type) changes.type = type;
+            if (changes.type !== type) changes.type = 'mixed';
+            return type;
+        }
+
+        function checkChanges(_, index) {
+            const original = linesA[index],
+                newContent = linesB[index];
+
+            if(newContent !== original) {
+                const type = setChangeType(original) || setChangeType(newContent);
+
+                addTypeToChanges(type);
+
                 changes.push({
                     type,
-                    was: a[index],
-                    became: b[index],
-                    attributes: source && (source[1] || source[3]),
-                    source: source && (source[2] || source[4])
+                    was: original,
+                    became: newContent,
+                    attributes: getAttributesFromLine(newContent),
+                    source: getSourceFromLine(newContent)
                 });
             }
-        });
+        }
+
+        //Always analyse the side with more lines
+        Array(Math.max(linesA.length,linesB.length))
+          .fill().forEach(checkChanges);
 
         return changes;
     }
