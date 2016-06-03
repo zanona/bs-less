@@ -311,6 +311,8 @@ module.exports = function (serverPath) {
             queue = [];
 
         function replaceTags(match, tag, attrs, content, index) {
+            //SKIP EMPTY TAGS
+            if (!content.trim()) { return match; }
             const format = getElementType(attrs) || (tag === 'script' ? 'js' : 'css'),
                 iFile = {
                     type: tag,
