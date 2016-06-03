@@ -265,8 +265,8 @@ module.exports = function (serverPath) {
     }
     function browserifyPromise(vFile) {
         return new Promise(function (resolve, reject) {
-            const importMatch = /^(?:\s*)?import\b|\brequire\(/gm;
-            if (!vFile.source.match(importMatch)) {
+            const moduleMatch = /^(?:[ \t]*)?(?:import|export)\b|\brequire\(/gm;
+            if (!vFile.source.match(moduleMatch)) {
                 return resolve(vFile); }
             var src = new stream.Readable();
             src.push(vFile.source);
@@ -295,8 +295,8 @@ module.exports = function (serverPath) {
     }
     function processJS(vFile) {
         return regenerate(vFile)
-            .then(babelPromise)
             .then(browserifyPromise)
+            .then(babelPromise)
             .then(replaceEnvVars)
             .catch(function (errorFile) {
                 errorFile.source = outputJSError(errorFile.source);
@@ -441,14 +441,7 @@ module.exports = function (serverPath) {
     }
     function onJSChange(eventName, filePath) {
         readFile(filePath)
-            .then(regenerate)
-            .then(babelPromise)
-            .then(browserifyPromise)
-            .then(replaceEnvVars)
-            .catch(function (errorFile) {
-                errorFile.source = outputJSError(errorFile.source);
-                return errorFile;
-            })
+            .then(processJS)
             .then(cachefy)
             .then(() => this.reload(filePath));
     }
