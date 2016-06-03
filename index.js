@@ -337,6 +337,13 @@ module.exports = function (serverPath) {
         vFile.source = vFile.source.replace(scriptPattern, replaceTags);
         return next(queue.shift());
     }
+    function processHTML(vFile) {
+        return replaceSSI(vFile)
+            .then(replaceEnvVars)
+            //.then(mergeInlineScripts)
+            //.then(groupLinkTags)
+            .then(processInlineScripts);
+    }
 
     function getDiff(a, b) {
         const styles = /(<style\b[^>]*>[\s\S]*?<\/style>?)|(<script\b[^>]*>[\s\S]*?<\/script>?)/,
@@ -427,11 +434,7 @@ module.exports = function (serverPath) {
     }
     function onHTMLChange(eventName, filePath) {
         readFile(filePath)
-            .then(replaceSSI)
-            .then(replaceEnvVars)
-            //.then(mergeInlineScripts)
-            //.then(groupLinkTags)
-            .then(processInlineScripts)
+            .then(processHTML)
             .then(broadcastChanges.bind(this))
             .then(cachefy)
             .then((isBroadcast) => {
