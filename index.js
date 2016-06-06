@@ -16,7 +16,11 @@ module.exports = function (serverPath) {
         es2015       = require('babel-preset-es2015'),
         postcss      = require('postcss'),
         marked       = require('marked').setOptions({smartypants: true}),
-        CACHE        = {};
+        CACHE        = {},
+        watcherOpts  = {
+            ignoreinitial: false,
+            ignored: ['node_modules', 'bower_components', 'build']
+        };
 
     function resolveFilePath(fileName, parentName) {
         var dir = path.dirname(parentName);
@@ -466,31 +470,18 @@ module.exports = function (serverPath) {
         server: serverPath,
         files: [
             {
-                options: { ignoreInitial: false },
-                match: [
-                    serverPath + '*.html',
-                    serverPath + 'lib/*.html',
-                    serverPath + 'lib/**.html'
-                ],
+                options: watcherOpts,
+                match: ['**/*.html'],
                 fn: onHTMLChange
             },
             {
-                options: { ignoreInitial: false },
-                match: [
-                    serverPath + '*.js',
-                    serverPath + 'scripts/*.js',
-                    serverPath + 'lib/*.js',
-                    serverPath + 'lib/*/*.js'
-                ],
+                options: watcherOpts,
+                match: ['**/*.js'],
                 fn: onJSChange
             },
             {
-                options: { ignoreInitial: false },
-                match: [
-                    serverPath + '*.{css,less}',
-                    serverPath + 'lib/*.{css,less}',
-                    serverPath + 'lib/*/*.{css,less}'
-                ],
+                options: watcherOpts,
+                match: ['**/*.{css,less}'],
                 fn: onStyleChange
             }
         ],
