@@ -24,10 +24,9 @@ module.exports = function (serverPath) {
 
     function resolveFilePath(fileName, parentName) {
         var dir = path.dirname(parentName);
+        if (fileName.match(/^\/\w/)) { dir = serverPath; }
         fileName = path.join(dir, fileName);
-        if (!path.extname(fileName)) {
-            return path.join(fileName, 'index.html');
-        }
+        if (!path.extname(fileName)) { return path.join(fileName, 'index.html'); }
         return fileName;
     }
     function replaceMatch(match, newContent, groupIndex) {
