@@ -42,15 +42,16 @@ module.exports = function (serverPath) {
     }
     function adjustFilePaths(vFile) {
         var links = /(?:src|href)=['"]?(.+?)['">\s]/g,
-            requires = /require\(['"](\..*?)['"]\)/g;
+            requires = /require\(['"]([\.\/].*?)['"]\)/g;
         return new Promise(function (resolve) {
             vFile.source = vFile.source.replace(links, function (m, src) {
                 if (src.match(/^(\w+:|#|\/)/)) { return m; }
                 var resolved = resolveFilePath(src, vFile.path);
                 return m.replace(src, resolved);
             }).replace(requires, function (m, src) {
-                var resolved = './' + resolveFilePath(src, vFile.path)
-                    .replace('/index.html', '');
+                var resolved = resolveFilePath(src, vFile.path)
+                    .replace('/index.html', '')
+                    .replace(/^\w/, './$&');
                 return m.replace(src, resolved);
             });
             resolve(vFile);
