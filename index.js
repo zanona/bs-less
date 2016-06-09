@@ -322,9 +322,13 @@ module.exports = function (serverPath) {
                     type: tag,
                     path: path.join(vPath.dir, `${vPath.name}_${tag}_${index}.${format}`),
                     source: content
-                };
+                },
+                //REMOVE LESS TYPE ONCE CONVERTED
+                nAttrs = attrs.replace('type=text/less', '');
             queue.push(iFile);
-            return match.replace(content, '@{' + iFile.path + '}');
+            return match
+                .replace(attrs, nAttrs)
+                .replace(content, '@{' + iFile.path + '}');
         }
         function next(iFile) {
             return new Promise((resolve) => {
