@@ -64,10 +64,13 @@ module.exports = function (serverPath) {
                 if (path.extname(filePath).match(/\.(md|mardown|mdown)/)) {
                     contents = marked(contents.toString());
                 }
-                resolve({
-                    path: filePath,
-                    source: contents.toString()
-                });
+                const vFile = { path: filePath, source: contents.toString() },
+                    cachedFile = CACHE[filePath];
+                //RETRIEVE PARENT FROM CACHE
+                if (cachedFile && cachedFile.parentPath) {
+                    vFile.parentPath = cachedFile.parentPath;
+                }
+                resolve(vFile);
             }
             fs.readFile(filePath, onFile);
         });
@@ -125,6 +128,11 @@ module.exports = function (serverPath) {
                     .then(function ($vFile) {
                         vFile.source = replaceMatch(match, $vFile.source);
                         check(pattern.exec(vFile.source));
+
+                        // UPDATE CACHED VERSION POINTING PARENT FILE
+                        $vFile.parentPath = vFile.path;
+                        CACHE[$vFile.path] = $vFile;
+
                         return vFile;
                     })
                     .catch(function (e) {
@@ -442,13 +450,21 @@ module.exports = function (serverPath) {
         }
         return vFile;
     }
-    function onHTMLChange(eventName, filePath) {
+    function onHTMLChange(_eventName, filePath) {
         readFile(filePath)
             .then(processHTML)
             .then(broadcastChanges.bind(this))
             .then(cachefy)
             .then((isBroadcast) => {
-                if (!isBroadcast) { this.reload(filePath); }
+                if (!isBroadcast) {
+                    const parentPath = CACHE[filePath].parentPath;
+                    if (parentPath) {
+                        //IF PARENT FILE, PROCESS PARENT
+                        return onHTMLChange.bind(this)(null, parentPath);
+                    }
+                    //WHEN NO MORE PARENT, RELOAD TOPMOST FILE
+                    this.reload(filePath);
+                }
             })
             .catch(console.error);
     }
