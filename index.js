@@ -1,5 +1,5 @@
 /*eslint indent:[1,4]*/
-module.exports = function (serverPath) {
+module.exports = function (serverPath, opts) {
     'use strict';
 
     var path         = require('path'),
@@ -481,7 +481,7 @@ module.exports = function (serverPath) {
             .then(() => this.reload(filePath));
     }
 
-    bs.init({
+    const config = {
         browser: 'google chrome',
         open: false,
         online: false,
@@ -529,6 +529,16 @@ module.exports = function (serverPath) {
                 fn: function (snippet) { return snippet; }
             }
         }
-    });
+    };
 
+    if (opts.ssl) {
+        console.log('SETTING HTTPS USING CUSTOM CERTIFICATE');
+        console.log(`LOOKING AT ${opts.ssl}.key and ${opts.ssl}.crt`);
+        config.https = {
+            key:  path.resolve(opts.ssl + '.key'),
+            cert: path.resolve(opts.ssl + '.crt')
+        };
+    }
+
+    bs.init(config);
 };
