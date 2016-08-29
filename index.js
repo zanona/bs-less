@@ -531,6 +531,7 @@ module.exports = function (serverPath, opts) {
         }
     };
 
+    if (opts.port) { config.port = opts.port; }
     if (opts.ssl) {
         console.log('SETTING HTTPS USING CUSTOM CERTIFICATE');
         console.log(`LOOKING AT ${opts.ssl}.key and ${opts.ssl}.crt`);
