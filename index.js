@@ -61,7 +61,7 @@ module.exports = function (serverPath, opts) {
         return new Promise(function (resolve, reject) {
             function onFile(err, contents) {
                 if (err) { return reject(err.message); }
-                if (path.extname(filePath).match(/\.(md|mardown|mdown)/)) {
+                if (path.extname(filePath).match(/\.(md|markdown|mdown)/)) {
                     contents = marked(contents.toString());
                 }
                 const vFile = { path: filePath, source: contents.toString() },
