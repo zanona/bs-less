@@ -508,8 +508,7 @@ module.exports = function (serverPath, opts) {
         injectFileTypes: ['css', 'less'],
         middleware: function (req, res, next) {
 
-            var cURL = req.url.replace(/\/$/, '/index.html'),
-                filePath = url.parse(cURL).pathname,
+            var filePath = url.parse(req.url).pathname.replace(/\/$/, '/index.html'),
                 fileSrc = path.join(serverPath, filePath),
                 cachedVersion = CACHE[fileSrc],
                 isDependency = filePath.match(/bower_components|node_modules/),
