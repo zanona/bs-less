@@ -510,11 +510,19 @@ module.exports = function (serverPath, opts) {
 
             var filePath = url.parse(req.url).pathname.replace(/\/$/, '/index.html'),
                 fileSrc = path.join(serverPath, filePath),
+                fileExt = path.extname(fileSrc) ? path.extname(fileSrc) : '.html',
                 cachedVersion = CACHE[fileSrc],
                 isDependency = filePath.match(/bower_components|node_modules/),
                 isXHR = req.headers['x-requested-with'] === 'XMLHttpRequest';
 
-            if (isXHR || isDependency || !cachedVersion) { return next(); }
+            if (opts['single-page'] &&  !cachedVersion && fileExt === '.html') {
+                try {
+                    fs.statSync(filePath);
+                } catch (_) {
+                    cachedVersion = CACHE[opts['single-page']];
+                }
+            }
+            if (isXHR || isDependency || !cachedVersion) return next();
 
             if (cachedVersion.mimeType) {
                 res.setHeader('content-type', cachedVersion.mimeType);
