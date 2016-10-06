@@ -8,13 +8,15 @@ module.exports = function (serverPath, opts) {
         stream       = require('stream'),
         bs           = require('browser-sync').create(),
         less         = require('less'),
-        autoprefixer = require('autoprefixer-core'),
+        autoprefixer = require('autoprefixer')({
+            browsers: ['last 2 versions', 'safari >= 8', 'ie >= 11']
+        }),
+        postcss      = require('postcss'),
         browserify   = require('browserify'),
         regenerator  = require('regenerator'),
         babel        = require('babel-core'),
         babelify     = require('babelify'),
         es2015       = require('babel-preset-es2015'),
-        postcss      = require('postcss'),
         marked       = require('marked').setOptions({smartypants: true}),
         CACHE        = {},
         watcherOpts  = {
