@@ -519,7 +519,7 @@ module.exports = function (serverPath, opts) {
 
             if (opts['single-page'] &&  !cachedVersion && fileExt === '.html') {
                 try {
-                    fs.statSync(filePath);
+                    fs.statSync(fileSrc);
                 } catch (_) {
                     cachedVersion = CACHE[opts['single-page']];
                 }
