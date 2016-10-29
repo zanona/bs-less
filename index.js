@@ -11,6 +11,7 @@ module.exports = function (serverPath, opts) {
         autoprefixer = require('autoprefixer')({
             browsers: ['last 2 versions', 'safari >= 8', 'ie >= 11']
         }),
+        flexfix      = require('postcss-flexbugs-fixes'),
         postcss      = require('postcss'),
         browserify   = require('browserify'),
         regenerator  = require('regenerator'),
@@ -150,7 +151,7 @@ module.exports = function (serverPath, opts) {
     function autoprefixCSS(vFile) {
         return new Promise((resolve, reject) => {
             try {
-                const post = postcss([autoprefixer])
+                const post = postcss([flexfix, autoprefixer])
                     .process(vFile.source, {
                         from: path.basename(vFile.path),
                         map: true
