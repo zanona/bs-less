@@ -336,6 +336,8 @@ module.exports = function (serverPath, opts) {
                 },
                 //REMOVE LESS TYPE ONCE CONVERTED
                 nAttrs = attrs.replace('type=text/less', '');
+            //SKIP TRANSPILING LD+JSON SCRIPTS
+            if (content && attrs.match(/application\/ld\+json/)) return match;
             queue.push(iFile);
             return match
                 .replace(attrs, nAttrs)
