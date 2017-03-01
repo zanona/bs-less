@@ -84,12 +84,12 @@ module.exports = function (serverPath, opts) {
         return match && match[1];
     }
 
-    function outputStyleError(msg) {
+    function outputStyleError(msg, filePath) {
         return ''
-            + 'root:before, :host:before {'
-            + '  content: "STYLE ERROR: ' + msg + '";'
+            + 'html:before, :host:before {'
+            + '  content: "STYLE ERROR: ' + msg + ' (' + filePath + ')";'
             + '  position: fixed;'
-            + '  font: 1em/1.5 monospace'
+            + '  font: 1em/1.5 sans-serif;'
             + '  top: 0;'
             + '  left: 0;'
             + '  right: 0;'
@@ -204,7 +204,7 @@ module.exports = function (serverPath, opts) {
                 errorFile.source = JSON.stringify(errorFile.source, null, 4)
                    .replace(/\n/g, '\\A')
                    .replace(/"/g, '\\"');
-                errorFile.source = outputStyleError(errorFile.source);
+                errorFile.source = outputStyleError(errorFile.source, errorFile.path);
                 return errorFile;
             });
     }
