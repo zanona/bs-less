@@ -125,9 +125,10 @@ module.exports = function (serverPath, opts) {
                 if (!match) { return resolve(vFile); }
                 readFile(resolveFilePath(match[1], vFile.path))
                     .then(adjustFilePaths)
+                    .then(processHTML)
                     //.then(processInlineScripts)
-                    .then(replaceSSI)
-                    .then(replaceEnvVars)
+                    //.then(replaceSSI)
+                    //.then(replaceEnvVars)
                     .then(function ($vFile) {
                         vFile.source = replaceMatch(match, $vFile.source);
                         check(pattern.exec(vFile.source));
