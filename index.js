@@ -44,11 +44,12 @@ module.exports = function (serverPath, opts) {
         return pre + raw.replace(content, () => newContent) + pos;
     }
     function adjustFilePaths(vFile) {
-        var links = /(?:src|href)=['"]?(.+?)['">\s]/g,
+        var links = /<[\w-]+ +.*?(?:src|href)=['"]?(.+?)['">\s]/g,
             requires = /require\(['"]([\.\/].*?)['"]\)/g;
         return new Promise(function (resolve) {
             vFile.source = vFile.source.replace(links, function (m, src) {
-                if (src.match(/^(\w+:|#|\/)/)) { return m; }
+                src = src.trim();
+                if (!src || src.match(/^(\w+:|#|\/|\$)/)) { return m; }
                 var resolved = resolveFilePath(src, vFile.path);
                 return m.replace(src, resolved);
             }).replace(requires, function (m, src) {
