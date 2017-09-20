@@ -17,7 +17,7 @@ module.exports = function (serverPath, opts) {
         regenerator  = require('regenerator'),
         babel        = require('babel-core'),
         babelify     = require('babelify'),
-        es2015       = require('babel-preset-es2015'),
+        esPresets    = require('babel-preset-env'),
         marked       = require('marked').setOptions({smartypants: true}),
         CACHE        = {},
         watcherOpts  = {
@@ -268,7 +268,7 @@ module.exports = function (serverPath, opts) {
             try {
                 vFile.source = babel.transform(vFile.source, {
                     filename: vFile.path,
-                    presets: [es2015]
+                    presets: [esPresets]
                 }).code;
                 resolve(vFile);
             } catch (e) {
@@ -293,7 +293,7 @@ module.exports = function (serverPath, opts) {
                 .transform(regenerator)
                 .transform(babelify, {
                     filename: vFile.path,
-                    presets: [es2015]
+                    presets: [esPresets]
                 })
                 .bundle(function (err, bundle) {
                     if (err) {
