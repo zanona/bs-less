@@ -14,10 +14,10 @@ module.exports = function (serverPath, opts) {
         flexfix      = require('postcss-flexbugs-fixes'),
         postcss      = require('postcss'),
         browserify   = require('browserify'),
-        regenerator  = require('regenerator'),
         babel        = require('babel-core'),
         babelify     = require('babelify'),
-        esPresets    = require('babel-preset-env'),
+        babelEnv     = require('babel-preset-env'),
+        babelStage3  = require('babel-preset-stage-3'),
         marked       = require('marked').setOptions({smartypants: true}),
         CACHE        = {},
         watcherOpts  = {
@@ -246,26 +246,12 @@ module.exports = function (serverPath, opts) {
     }
     */
 
-    function regenerate(vFile) {
-        return new Promise((resolve, reject) => {
-            try {
-                vFile.source = regenerator.compile(vFile.source).code;
-                resolve(vFile);
-            } catch (e) {
-                reject({
-                    error: true,
-                    path: vFile.path,
-                    source: e.message
-                });
-            }
-        });
-    }
     function babelPromise(vFile) {
         return new Promise((resolve, reject) => {
             try {
                 vFile.source = babel.transform(vFile.source, {
                     filename: vFile.path,
-                    presets: [esPresets]
+                    presets: [babelEnv, babelStage3]
                 }).code;
                 resolve(vFile);
             } catch (e) {
@@ -286,10 +272,9 @@ module.exports = function (serverPath, opts) {
             src.push(null);
             src.file = vFile.path;
             browserify(src, {debug: true})
-                .transform(regenerator)
                 .transform(babelify, {
                     filename: vFile.path,
-                    presets: [esPresets],
+                    presets: [babelEnv, babelStage3],
                     global: true
                 })
                 .bundle(function (err, bundle) {
@@ -312,7 +297,7 @@ module.exports = function (serverPath, opts) {
             return Promise.resolve(vFile);
         }
         if (vFile.source.match(/require\(/)) {
-            promise = regenerate(vFile).then(browserifyPromise);
+            promise = browserifyPromise(vFile);
         } else {
             promise = babelPromise(vFile);
         }
