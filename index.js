@@ -104,10 +104,13 @@ module.exports = function (serverPath, opts) {
     }
 
     function replaceEnvVars(vFile) {
-        var pattern = /\$ENV\[['"]?([\w\.\-\/@]+?)['"]?\]/g;
+        var pattern     = /(?:\$ENV|process\.env)\[['"]?([\w\.\-\/@]+?)['"]?\]/g,
+            nodePattern = /process.env(?:\.(.+?)\b|\[(["'])(.+?)\2\])/g;
         return new Promise(function (resolve) {
             vFile.source = vFile.source.replace(pattern, function (_, v) {
                 return process.env[v] || '';
+            }).replace(nodePattern, function (m,v1,_,v3) {
+                return `'${process.env[v1 || v3] || ''}'`;
             });
             resolve(vFile);
         });
