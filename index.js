@@ -44,18 +44,12 @@ module.exports = function (serverPath, opts) {
         return pre + raw.replace(content, () => newContent) + pos;
     }
     function adjustFilePaths(vFile) {
-        var links = /<[\w-]+ +.*?(?:src|href)=['"]?(.+?)['">\s]/g,
-            requires = /require\(['"]([\.\/].*?)['"]\)/g;
+        var links = /<[\w-]+ +.*?(?:src|href)=['"]?(.+?)['">\s]/g;
         return new Promise(function (resolve) {
             vFile.source = vFile.source.replace(links, function (m, src) {
                 src = src.trim();
                 if (!src || src.match(/^(\w+:|#|\/|\$)/)) { return m; }
                 var resolved = resolveFilePath(src, vFile.path);
-                return m.replace(src, resolved);
-            }).replace(requires, function (m, src) {
-                var resolved = resolveFilePath(src, vFile.path)
-                    .replace('/index.html', '')
-                    .replace(/^\w/, './$&');
                 return m.replace(src, resolved);
             });
             resolve(vFile);
@@ -283,9 +277,8 @@ module.exports = function (serverPath, opts) {
     function browserifyPromise(vFile) {
         return new Promise(function (resolve, reject) {
             const moduleMatch = /^(?:[ \t]*)?(?:import|export)\b|\brequire\(/gm;
-            if (!vFile.source.match(moduleMatch)) {
-                return resolve(vFile); }
-            var src = new stream.Readable();
+            if (!vFile.source.match(moduleMatch)) return resolve(vFile);
+            const src = new stream.Readable(); //eslint-disable-line one-var
             src.push(vFile.source);
             src.push(null);
             src.file = vFile.path;
@@ -293,7 +286,8 @@ module.exports = function (serverPath, opts) {
                 .transform(regenerator)
                 .transform(babelify, {
                     filename: vFile.path,
-                    presets: [esPresets]
+                    presets: [esPresets],
+                    global: true
                 })
                 .bundle(function (err, bundle) {
                     if (err) {
@@ -303,22 +297,26 @@ module.exports = function (serverPath, opts) {
                             source: err.message
                         });
                     }
-                    resolve({
-                        path: vFile.path,
-                        source: bundle.toString()
-                    });
+                    resolve({path: vFile.path, source: bundle.toString()});
                 });
         });
     }
     function processJS(vFile) {
-        return regenerate(vFile)
-            .then(browserifyPromise)
-            .then(babelPromise)
-            .then(replaceEnvVars)
-            .catch(function (errorFile) {
-                errorFile.source = outputJSError(errorFile.source);
-                return errorFile;
-            });
+        let promise;
+        if (vFile.source.match('module.exports')) {
+            // do not process raw modules since those should
+            // be included by other file
+            return Promise.resolve(vFile);
+        }
+        if (vFile.source.match(/require\(/)) {
+            promise = regenerate(vFile).then(browserifyPromise);
+        } else {
+            promise = babelPromise(vFile);
+        }
+        return promise.then(replaceEnvVars).catch(function (errorFile) {
+            errorFile.source = outputJSError(errorFile.source);
+            return errorFile;
+        });
     }
 
     function processInlineScripts(vFile) {
