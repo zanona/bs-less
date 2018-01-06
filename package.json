@@ -32,5 +32,18 @@
   "bugs": {
     "url": "https://github.com/zanona/bs-less/issues"
   },
+  "xo": {
+    "semicolon": false,
+    "rules": {
+      "complexity": [
+        "warn",
+        6
+      ],
+      "max-statements": [
+        "warn",
+        30
+      ]
+    }
+  },
   "homepage": "https://github.com/zanona/bs-less#readme"
 }
