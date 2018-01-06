@@ -312,7 +312,10 @@ module.exports = function (serverPath, opts) {
 			})
 		})
 		.then(bundle => {
-			file.source = bundle.code
+			file.source =
+				bundle.code +
+				'\n\n//# sourceMappingURL=data:application/json;charset=utf8;base64,' +
+				Buffer.from(JSON.stringify(bundle.map)).toString('base64') + '\n'
 			return file
 		})
 	}
