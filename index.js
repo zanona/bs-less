@@ -2,18 +2,21 @@ module.exports = function (serverPath, opts) {
 	const path = require('path')
 	const fs = require('fs')
 	const url = require('url')
-	const stream = require('stream')
 	const bs = require('browser-sync').create()
 	const less = require('less')
 	const autoprefixer = require('autoprefixer')({browsers: ['last 2 versions', 'safari >= 8', 'ie >= 11']})
 	const flexfix = require('postcss-flexbugs-fixes')
 	const postcss = require('postcss')
-	const browserify = require('browserify')
-	const babel = require('babel-core')
-	const babelify = require('babelify')
-	const babelEnv = require('babel-preset-env')
-	const babelStage3 = require('babel-preset-stage-3')
 	const marked = require('marked').setOptions({smartypants: true})
+	const rollup = require('rollup').rollup
+	const json = require('rollup-plugin-json')
+	const replace = require('rollup-plugin-re')
+	const commonjs = require('rollup-plugin-commonjs')
+	const resolve = require('rollup-plugin-node-resolve')
+	const builtins = require('rollup-plugin-node-builtins')
+	const globals = require('rollup-plugin-node-globals')
+	const nodent = require('rollup-plugin-nodent')
+	const buble = require('rollup-plugin-buble')
 	const CACHE = {}
 	const watcherOpts = {
 		ignoreinitial: false,
@@ -116,6 +119,14 @@ module.exports = function (serverPath, opts) {
 				return `'${process.env[v1 || v3] || ''}'`
 			})
 			resolve(vFile)
+		})
+	}
+	function replaceNodeEnvVars() {
+		return replace({
+			patterns: [{
+				test: /process.env(?:\.(.+?)\b|\[(["'])(.+?)\2\])/g,
+				replace: (m, v1, _, v3) => JSON.stringify(process.env[v1 || v3] || '')
+			}]
 		})
 	}
 	function replaceSSI(vFile) {
@@ -252,66 +263,71 @@ module.exports = function (serverPath, opts) {
 	}
 	*/
 
-	function babelPromise(vFile) {
-		return new Promise((resolve, reject) => {
-			try {
-				vFile.source = babel.transform(vFile.source, {
-					filename: vFile.path,
-					presets: [babelEnv, babelStage3]
-				}).code
-				resolve(vFile)
-			} catch (err) {
-				reject(new Error({
-					error: true,
-					path: vFile.path,
-					source: err.message
-				}))
+	function virtualInput(file) {
+		return {
+			name: 'rollup-plugin-virtual-input',
+			load: id => {
+				if (file.path === id) {
+					return file.source
+				}
+			},
+			resolveId: id => {
+				if (file.path === id) {
+					return file.path
+				}
 			}
+		}
+	}
+	function fmtBundleName(filename) {
+		filename = filename.replace(/\.js$/, '')
+		const paths = filename.split(/[/\-_]/)
+		return paths.reduce((p, c, index) => {
+			if (index > 0) {
+				c = c.replace(/./, m => m.toUpperCase())
+			}
+			p += c
+			return p
+		}, '')
+	}
+	function transpile(file) {
+		return rollup({
+			input: file.path,
+			plugins: [
+				virtualInput(file),
+				json(),
+				resolve({preferBuiltins: true, browser: true, jsnext: true}),
+				commonjs(),
+				builtins(),
+				replaceNodeEnvVars(),
+				nodent({promises: true, noRuntime: true}),
+				buble(),
+				globals()
+			]
+		})
+		.then(bundle => {
+			return bundle.generate({
+				name: fmtBundleName(file.path),
+				format: 'iife',
+				sourcemap: true
+			})
+		})
+		.then(bundle => {
+			file.source = bundle.code
+			return file
 		})
 	}
-	function browserifyPromise(vFile) {
-		return new Promise((resolve, reject) => {
-			const moduleMatch = /^(?:[ \t]*)?(?:import|export)\b|\brequire\(/gm
-			if (!vFile.source.match(moduleMatch)) {
-				return resolve(vFile)
-			}
-			const src = new stream.Readable() // eslint-disable-line one-var
-			src.push(vFile.source)
-			src.push(null)
-			src.file = vFile.path
-			browserify(src, {debug: true})
-				.transform(babelify, {
-					filename: vFile.path,
-					presets: [babelEnv, babelStage3],
-					global: true
-				})
-				.bundle((err, bundle) => {
-					if (err) {
-						return reject(new Error({
-							error: true,
-							path: vFile.path,
-							source: err.message
-						}))
-					}
-					resolve({path: vFile.path, source: bundle.toString()})
-				})
-		})
+
+	function hasExports(contents) {
+		const pattern = /^\s*(module\.exports|exports\.|export )/gm
+		return pattern.test(contents)
 	}
 	function processJS(vFile) {
-		let promise
-		if (vFile.source.match('module.exports')) {
-			// Do not process raw modules since those should
-			// be included by other file
+		if (hasExports(vFile.contents)) {
 			return Promise.resolve(vFile)
 		}
-		if (vFile.source.match(/require\(/)) {
-			promise = browserifyPromise(vFile)
-		} else {
-			promise = babelPromise(vFile)
-		}
-		return promise.then(replaceEnvVars).catch(err => {
-			err.source = outputJSError(err.source)
-			return err
+		return transpile(vFile).catch(err => {
+			vFile.source = outputJSError(err.message)
+			return vFile
 		})
 	}
 
