@@ -12,7 +12,7 @@ module.exports = function (serverPath, opts) {
 	const json = require('rollup-plugin-json')
 	const replace = require('rollup-plugin-re')
 	const commonjs = require('rollup-plugin-commonjs')
-	const resolve = require('rollup-plugin-node-resolve')
+	const nodeResolve = require('rollup-plugin-node-resolve')
 	const builtins = require('rollup-plugin-node-builtins')
 	const globals = require('rollup-plugin-node-globals')
 	const nodent = require('rollup-plugin-nodent')
@@ -295,7 +295,12 @@ module.exports = function (serverPath, opts) {
 			plugins: [
 				virtualInput(file),
 				json(),
-				resolve({preferBuiltins: true, browser: true, jsnext: true}),
+				nodeResolve({
+					preferBuiltins: true,
+					browser: true,
+					jsnext: true,
+					extensions: ['.js', '.json']
+				}),
 				commonjs(),
 				builtins(),
 				replaceNodeEnvVars(),
@@ -304,20 +309,20 @@ module.exports = function (serverPath, opts) {
 				globals()
 			]
 		})
-		.then(bundle => {
-			return bundle.generate({
-				name: fmtBundleName(file.path),
-				format: 'iife',
-				sourcemap: true
+			.then(bundle => {
+				return bundle.generate({
+					name: fmtBundleName(file.path),
+					format: 'iife',
+					sourcemap: true
+				})
 			})
-		})
-		.then(bundle => {
-			file.source =
-				bundle.code +
-				'\n\n//# sourceMappingURL=data:application/json;charset=utf8;base64,' +
-				Buffer.from(JSON.stringify(bundle.map)).toString('base64') + '\n'
-			return file
-		})
+			.then(bundle => {
+				file.source =
+					bundle.code +
+					'\n\n//# sourceMappingURL=data:application/json;charset=utf8;base64,' +
+					Buffer.from(JSON.stringify(bundle.map)).toString('base64') + '\n'
+				return file
+			})
 	}
 
 	function hasExports(contents) {
